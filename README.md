@@ -168,7 +168,7 @@ The device's own onboard schedule already ramps brightness up and down across th
 - `xr15_schedule_helpers.yaml` — two `input_datetime` helpers (`radion_xr15_acilis_saati` / `radion_xr15_kapanis_saati`) for the on/off times, adjustable from the dashboard. Paste into `configuration.yaml`.
 - `xr15_schedule_automations.yaml` — two automations that call `light.turn_on`/`light.turn_off` at those times. Append to `automations.yaml`.
 
-`dashboards/akvaryum.yaml` is an example Lovelace dashboard (Turkish) that ties it together — a `light` tile with brightness control plus an entities card for the two time helpers. It also references several sensors/switches specific to one particular aquarium setup (temperature probe, ATO controller, leak sensor, KH controller) — treat it as a template to adapt, not a drop-in file.
+`dashboards/akvaryum.yaml` is an example Lovelace dashboard (Turkish) that ties it together — a `light` tile with brightness control plus two [`lovelace-time-picker-card`](https://github.com/GeorgeSG/lovelace-time-picker-card) cards (HACS) for the two time helpers. It also references several sensors/switches specific to one particular aquarium setup (temperature probe, ATO controller, leak sensor, KH controller) — treat it as a template to adapt, not a drop-in file.
 
 ---
 
