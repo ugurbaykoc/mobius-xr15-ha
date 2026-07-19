@@ -149,11 +149,20 @@ tap_action:
 
 For a native integration without `rest_command` or a separate bridge process, copy `custom_components/mobius_xr15/` into your HA `config/custom_components/` directory, restart HA, then add it via **Settings → Devices & Services → Add Integration → "Mobius XR15"** and enter the light's MAC address.
 
-This adds a real `light.radion_xr15w_g5_pro` entity:
-- **On** restores the schedule (same reverse-engineered program as above) and resumes playback.
+This adds a real `light.radion_xr15w_g5_pro` entity, plus a full set of schedule-editing entities:
+- **On** installs the current schedule (see below) and resumes playback.
 - **Off** writes an all-zero schedule.
-- **Brightness** maps directly to the device's `Schedule1Intensity` attribute (0–1000 on the wire ↔ 0–255 in HA). Adjusting brightness while the light is already on only retargets intensity — it doesn't rewrite the whole schedule.
+- **Brightness** maps directly to the device's `Schedule1Intensity` attribute (0–1000 on the wire ↔ 0–255 in HA) — an overall multiplier on top of the whole schedule. Adjusting brightness while the light is already on only retargets intensity — it doesn't rewrite the whole schedule.
 - State is optimistic (the device has no reliable readback over this protocol) and is restored across HA restarts.
+
+The 11-point schedule (originally hardcoded — dawn ramp, noon peak, dusk, night) is fully editable per slot and per channel, right from HA:
+- One `time.*` entity per schedule slot (11 total) — when that point in the day starts.
+- One `number.*` entity per (slot, channel) pair (11 × 13 = 143 total) — that channel's target value (0–1000) at that point.
+- A `button.*` entity, **Apply Schedule**, that pushes the current values to the device immediately (without needing a full off/on cycle — useful while the light is already on).
+
+All of these appear automatically under the device's page (Settings → Devices & Services → Mobius XR15 device) — no dashboard work needed to use them, though with 154 entities per light you may want a dedicated dashboard view for convenient editing rather than scrolling the device page. Turning the light on always re-installs whatever the current edited values are, so edits persist across HA restarts the same way the light's own state does.
+
+> ⚠️ Editing many sliders and then hitting **Apply Schedule** issues one full 25-slot BLE write (several seconds, ~10 packets). Don't wire anything to auto-apply on every single slider tick — batch your edits, then apply once.
 
 It uses Home Assistant's own Bluetooth integration for the connection (via `bleak-retry-connector`), so:
 
@@ -198,8 +207,12 @@ The device's own onboard schedule already ramps brightness up and down across th
         ├── config_flow.py            # UI setup: enter the light's MAC address
         ├── const.py
         ├── protocol.py               # pure C2 protocol packet builders (no I/O)
+        ├── schedule.py               # builds schedule slots from the editable entities
         ├── client.py                 # BLE transport (bleak-retry-connector)
         ├── light.py                  # light.radion_xr15w_g5_pro entity
+        ├── number.py                 # per-slot, per-channel value entities (143)
+        ├── time.py                   # per-slot time entities (11)
+        ├── button.py                 # "Apply Schedule" action
         └── strings.json / translations/en.json
 ```
 

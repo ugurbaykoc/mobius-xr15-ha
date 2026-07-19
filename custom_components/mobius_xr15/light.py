@@ -12,8 +12,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .client import MobiusXR15Client
-from .const import DOMAIN, MAX_INTENSITY
-from .protocol import build_blank_schedule, build_original_schedule
+from .const import DOMAIN
+from .protocol import build_blank_schedule
+from .schedule import brightness_to_intensity, build_slots_from_entities, intensity_to_brightness
 
 DEFAULT_INTENSITY = 500
 
@@ -22,16 +23,10 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up the Mobius XR15 light from a config entry."""
-    client: MobiusXR15Client = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([MobiusXR15Light(client, entry)])
-
-
-def _brightness_to_intensity(brightness: int) -> int:
-    return round(brightness / 255 * MAX_INTENSITY)
-
-
-def _intensity_to_brightness(intensity: int) -> int:
-    return round(intensity / MAX_INTENSITY * 255)
+    store = hass.data[DOMAIN][entry.entry_id]
+    light = MobiusXR15Light(store["client"], entry)
+    store["light"] = light
+    async_add_entities([light])
 
 
 class MobiusXR15Light(LightEntity, RestoreEntity):
@@ -51,6 +46,7 @@ class MobiusXR15Light(LightEntity, RestoreEntity):
 
     def __init__(self, client: MobiusXR15Client, entry: ConfigEntry) -> None:
         self._client = client
+        self._entry_id = entry.entry_id
         mac = entry.data[CONF_MAC]
         self._attr_unique_id = format_mac(mac)
         self._attr_device_info = DeviceInfo(
@@ -60,7 +56,7 @@ class MobiusXR15Light(LightEntity, RestoreEntity):
             model="Radion XR15w G5 Pro",
         )
         self._attr_is_on = False
-        self._attr_brightness = _intensity_to_brightness(DEFAULT_INTENSITY)
+        self._attr_brightness = intensity_to_brightness(DEFAULT_INTENSITY)
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -74,12 +70,14 @@ class MobiusXR15Light(LightEntity, RestoreEntity):
         if ATTR_BRIGHTNESS in kwargs:
             self._attr_brightness = kwargs[ATTR_BRIGHTNESS]
 
-        intensity = _brightness_to_intensity(self._attr_brightness)
+        intensity = brightness_to_intensity(self._attr_brightness)
         if self._attr_is_on:
             # Schedule is already playing - just retarget the intensity.
             await self._client.async_set_intensity(intensity)
         else:
-            await self._client.async_write_schedule(build_original_schedule(), intensity)
+            store = self.hass.data[DOMAIN][self._entry_id]
+            slots = build_slots_from_entities(store["channel_numbers"], store["slot_times"])
+            await self._client.async_write_schedule(slots, intensity)
 
         self._attr_is_on = True
         self.async_write_ha_state()

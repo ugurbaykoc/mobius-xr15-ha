@@ -8,13 +8,18 @@ from homeassistant.core import HomeAssistant
 from .client import MobiusXR15Client
 from .const import DOMAIN
 
-PLATFORMS: list[Platform] = [Platform.LIGHT]
+PLATFORMS: list[Platform] = [
+    Platform.LIGHT,
+    Platform.NUMBER,
+    Platform.TIME,
+    Platform.BUTTON,
+]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Mobius XR15 from a config entry."""
     client = MobiusXR15Client(hass, entry.data[CONF_MAC])
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = client
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {"client": client}
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
