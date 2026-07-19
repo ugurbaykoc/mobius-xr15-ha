@@ -14,7 +14,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from .client import MobiusXR15Client
 from .const import DOMAIN
 from .protocol import build_blank_schedule
-from .schedule import brightness_to_intensity, build_slots_from_entities, intensity_to_brightness
+from .schedule import brightness_to_intensity, build_flat_schedule, intensity_to_brightness
 
 DEFAULT_INTENSITY = 500
 
@@ -76,7 +76,7 @@ class MobiusXR15Light(LightEntity, RestoreEntity):
             await self._client.async_set_intensity(intensity)
         else:
             store = self.hass.data[DOMAIN][self._entry_id]
-            slots = build_slots_from_entities(store["channel_numbers"], store["slot_times"])
+            slots = build_flat_schedule(store["channel_numbers"])
             await self._client.async_write_schedule(slots, intensity)
 
         self._attr_is_on = True

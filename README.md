@@ -149,20 +149,17 @@ tap_action:
 
 For a native integration without `rest_command` or a separate bridge process, copy `custom_components/mobius_xr15/` into your HA `config/custom_components/` directory, restart HA, then add it via **Settings → Devices & Services → Add Integration → "Mobius XR15"** and enter the light's MAC address.
 
-This adds a real `light.radion_xr15w_g5_pro` entity, plus a full set of schedule-editing entities:
-- **On** installs the current schedule (see below) and resumes playback.
+This adds a real `light.radion_xr15w_g5_pro` entity, plus a set of color-recipe entities:
+- **On** installs the current color recipe (see below) across the device's original 11 time points and resumes playback — the day/night dimming shape from the original reverse-engineered schedule is preserved, but every point now carries the same flat color mix rather than a distinct ramp.
 - **Off** writes an all-zero schedule.
-- **Brightness** maps directly to the device's `Schedule1Intensity` attribute (0–1000 on the wire ↔ 0–255 in HA) — an overall multiplier on top of the whole schedule. Adjusting brightness while the light is already on only retargets intensity — it doesn't rewrite the whole schedule.
+- **Brightness** maps directly to the device's `Schedule1Intensity` attribute (0–1000 on the wire ↔ 0–255 in HA) — an overall multiplier on top of the recipe. Adjusting brightness while the light is already on only retargets intensity — it doesn't rewrite the schedule.
 - State is optimistic (the device has no reliable readback over this protocol) and is restored across HA restarts.
 
-The 11-point schedule (originally hardcoded — dawn ramp, noon peak, dusk, night) is fully editable per slot and per channel, right from HA:
-- One `time.*` entity per schedule slot (11 total) — when that point in the day starts.
-- One `number.*` entity per (slot, channel) pair (11 × 13 = 143 total) — that channel's target value (0–1000) at that point.
-- A `button.*` entity, **Apply Schedule**, that pushes the current values to the device immediately (without needing a full off/on cycle — useful while the light is already on).
+The color recipe is 10 `number.*` entities, one per channel (UV, Violet, Royal Blue, Blue, Green, Red, Moonlight Blue, Warm White, Cool White, Brightness — the 3 unidentified protocol channels are left at 0 and not exposed), plus a `button.*` entity, **Apply Schedule**, that pushes the current values to the device immediately without needing a full off/on cycle. All of these appear automatically under the device's page (Settings → Devices & Services → Mobius XR15 device). Turning the light on always re-installs the current recipe, so edits persist across HA restarts the same way the light's own state does.
 
-All of these appear automatically under the device's page (Settings → Devices & Services → Mobius XR15 device) — no dashboard work needed to use them, though with 154 entities per light you may want a dedicated dashboard view for convenient editing rather than scrolling the device page. Turning the light on always re-installs whatever the current edited values are, so edits persist across HA restarts the same way the light's own state does.
+For day/night timing, use the auto on/off schedule below rather than editing per-time-of-day values — this integration intentionally doesn't expose per-slot editing (11 slots × 13 channels = 143 entities proved unwieldy in practice).
 
-> ⚠️ Editing many sliders and then hitting **Apply Schedule** issues one full 25-slot BLE write (several seconds, ~10 packets). Don't wire anything to auto-apply on every single slider tick — batch your edits, then apply once.
+> ⚠️ Editing several sliders and then hitting **Apply Schedule** issues one full 25-slot BLE write (several seconds, ~6 packets). Don't wire anything to auto-apply on every single slider tick — batch your edits, then apply once.
 
 It uses Home Assistant's own Bluetooth integration for the connection (via `bleak-retry-connector`), so:
 
@@ -177,13 +174,17 @@ The device's own onboard schedule already ramps brightness up and down across th
 - `xr15_schedule_helpers.yaml` — two `input_datetime` helpers (`radion_xr15_acilis_saati` / `radion_xr15_kapanis_saati`) for the on/off times, adjustable from the dashboard. Paste into `configuration.yaml`.
 - `xr15_schedule_automations.yaml` — two automations that call `light.turn_on`/`light.turn_off` at those times. Append to `automations.yaml`.
 
-`dashboards/akvaryum.yaml` is an example Lovelace dashboard (Turkish) that ties it together — a `light` tile with brightness control plus two `xr15-time-picker-card` cards for the two time helpers. It also references several sensors/switches specific to one particular aquarium setup (temperature probe, ATO controller, leak sensor, KH controller) — treat it as a template to adapt, not a drop-in file.
+`dashboards/akvaryum.yaml` is an example Lovelace dashboard (Turkish) that ties it together — a `light` tile with brightness control, two `xr15-time-picker-card` cards for the on/off schedule, ten `xr15-channel-bar-card` color sliders, and the Apply Schedule button. It also references several sensors/switches specific to one particular aquarium setup (temperature probe, ATO controller, leak sensor, KH controller) — treat it as a template to adapt, not a drop-in file. The `number.*` entity IDs it references (e.g. `number.radion_xr15w_g5_pro_uv`) are HA's standard slug of the device + entity name — verify them against Settings → Devices & Services → Entities after setup and adjust if HA generated something different.
 
-`www/xr15-time-picker-card.js` is a small self-contained custom Lovelace card (no dependencies, no build step) wrapping the browser's native `<input type="time">` for an `input_datetime` entity. On iOS Safari this renders as the OS's native scrolling wheel picker; other browsers fall back to their own time control (a plain box on desktop Chrome, a clock dial on Android) — the wheel look is a browser/OS behavior, not something any Lovelace card can force everywhere. To use it:
+`www/xr15-time-picker-card.js` and `www/xr15-channel-bar-card.js` are small self-contained custom Lovelace cards (no dependencies, no build step):
+- `xr15-time-picker-card.js` wraps the browser's native `<input type="time">` for an `input_datetime` entity. On iOS Safari this renders as the OS's native scrolling wheel picker; other browsers fall back to their own time control (a plain box on desktop Chrome, a clock dial on Android) — the wheel look is a browser/OS behavior, not something any Lovelace card can force everywhere.
+- `xr15-channel-bar-card.js` wraps the native `<input type="range">` for a `number` entity, tinted via CSS `accent-color` to match the channel it controls (e.g. purple for UV, red for Red).
 
-1. Copy `www/xr15-time-picker-card.js` to your HA `config/www/` directory.
-2. Add it as a dashboard resource: **Settings → Dashboards → 3-dot menu → Resources → Add Resource**, URL `/local/xr15-time-picker-card.js`, type **JavaScript Module**.
-3. Use `type: custom:xr15-time-picker-card` with an `entity:` (and optional `name:`) in a card, as done in `dashboards/akvaryum.yaml`.
+To use either:
+
+1. Copy the `.js` file to your HA `config/www/` directory.
+2. Add it as a dashboard resource: **Settings → Dashboards → 3-dot menu → Resources → Add Resource**, URL `/local/<filename>.js`, type **JavaScript Module**.
+3. Use `type: custom:xr15-time-picker-card` or `type: custom:xr15-channel-bar-card` with an `entity:` (plus `color:` for the bar card) in a card, as done in `dashboards/akvaryum.yaml`.
 
 ---
 
@@ -199,7 +200,8 @@ The device's own onboard schedule already ramps brightness up and down across th
 ├── dashboards/
 │   └── akvaryum.yaml                 # example Lovelace dashboard (template, adapt to your setup)
 ├── www/
-│   └── xr15-time-picker-card.js      # optional: native-wheel time picker card for the schedule
+│   ├── xr15-time-picker-card.js      # optional: native-wheel time picker card for the on/off schedule
+│   └── xr15-channel-bar-card.js      # optional: colored slider card for the color recipe
 └── custom_components/
     └── mobius_xr15/                  # native HA integration (recommended)
         ├── manifest.json
@@ -207,11 +209,10 @@ The device's own onboard schedule already ramps brightness up and down across th
         ├── config_flow.py            # UI setup: enter the light's MAC address
         ├── const.py
         ├── protocol.py               # pure C2 protocol packet builders (no I/O)
-        ├── schedule.py               # builds schedule slots from the editable entities
+        ├── schedule.py               # builds the flat schedule from the color entities
         ├── client.py                 # BLE transport (bleak-retry-connector)
         ├── light.py                  # light.radion_xr15w_g5_pro entity
-        ├── number.py                 # per-slot, per-channel value entities (143)
-        ├── time.py                   # per-slot time entities (11)
+        ├── number.py                 # per-channel color recipe entities (10)
         ├── button.py                 # "Apply Schedule" action
         └── strings.json / translations/en.json
 ```

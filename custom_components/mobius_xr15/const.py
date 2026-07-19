@@ -38,21 +38,41 @@ TX_FINAL_UUID = "01ff0104-ba5e-f4ee-5ca1-eb1e5e4b1ce0"
 RX_DATA_UUID = "01ff0101-ba5e-f4ee-5ca1-eb1e5e4b1ce0"
 RX_FINAL_UUID = "01ff0102-ba5e-f4ee-5ca1-eb1e5e4b1ce0"
 
-# Default per-slot schedule: the reverse-engineered coral + fish program
-# (UV/blue-weighted, day simulation) that used to be hardcoded in
-# protocol.py. Now only used to seed the editable number/time entities on
-# first setup - after that, the live entity states are the source of truth.
-# Channels omitted at a given time default to 0.
-DEFAULT_SCHEDULE_POINTS: tuple[dict, ...] = (
-    {"time": "00:00", "channels": {32: 150, 17: 50, 1: 200}},
-    {"time": "06:00", "channels": {32: 300, 1: 400}},
-    {"time": "08:00", "channels": {21: 200, 23: 300, 18: 400, 17: 300, 19: 100, 20: 50, 22: 100, 16: 100, 32: 100, 1: 600}},
-    {"time": "10:00", "channels": {21: 600, 23: 700, 18: 800, 17: 600, 19: 200, 20: 100, 22: 200, 16: 200, 1: 800}},
-    {"time": "12:00", "channels": {21: 800, 23: 900, 18: 1000, 17: 800, 19: 300, 20: 150, 22: 300, 16: 300, 1: 1000}},
-    {"time": "14:00", "channels": {21: 800, 23: 900, 18: 1000, 17: 800, 19: 300, 20: 150, 22: 300, 16: 300, 1: 1000}},
-    {"time": "16:00", "channels": {21: 600, 23: 700, 18: 800, 17: 600, 19: 200, 20: 100, 22: 200, 16: 200, 1: 800}},
-    {"time": "18:00", "channels": {21: 200, 23: 300, 18: 400, 17: 300, 19: 100, 20: 50, 22: 100, 16: 100, 32: 100, 1: 600}},
-    {"time": "20:00", "channels": {18: 100, 17: 100, 32: 300, 1: 400}},
-    {"time": "22:00", "channels": {32: 150, 1: 200}},
-    {"time": "23:30", "channels": {32: 50, 1: 100}},
-)
+# The original reverse-engineered schedule wrote 11 time points across the
+# day (dawn ramp, noon peak, dusk, night). The editable UI is now a single
+# flat "color recipe" - no per-time-of-day editing - but the same 11 times
+# are still used on the wire, all carrying that one recipe, since they're
+# known-good against the device's schedule parser.
+FIXED_SCHEDULE_TIMES: tuple[int, ...] = (0, 360, 480, 600, 720, 840, 960, 1080, 1200, 1320, 1410)
+
+# Channels exposed as user-editable color sliders (excludes the 3 unknown
+# channels, which are left at 0).
+COLOR_CHANNELS: tuple[int, ...] = (21, 23, 18, 17, 19, 20, 32, 22, 16, 1)
+
+# Default per-channel values, taken from the original schedule's noon peak.
+DEFAULT_CHANNEL_VALUES: dict[int, int] = {
+    21: 800,  # UV
+    23: 900,  # Violet
+    18: 1000,  # Royal Blue
+    17: 800,  # Blue
+    19: 300,  # Green
+    20: 150,  # Red
+    32: 0,  # Moonlight Blue
+    22: 300,  # Warm White
+    16: 300,  # Cool White
+    1: 1000,  # Brightness
+}
+
+# Approximate display color per channel, for a colored slider bar.
+CHANNEL_COLORS: dict[int, str] = {
+    21: "#7c3aed",  # UV - violet
+    23: "#a855f7",  # Violet
+    18: "#1d4ed8",  # Royal Blue
+    17: "#3b82f6",  # Blue
+    19: "#22c55e",  # Green
+    20: "#ef4444",  # Red
+    32: "#312e81",  # Moonlight Blue - deep indigo
+    22: "#fbbf24",  # Warm White - amber
+    16: "#bae6fd",  # Cool White - pale cyan
+    1: "#f8fafc",  # Brightness - near white
+}

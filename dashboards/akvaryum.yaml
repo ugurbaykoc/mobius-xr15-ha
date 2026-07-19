@@ -329,6 +329,64 @@ views:
               - type: custom:xr15-time-picker-card
                 entity: input_datetime.radion_xr15_kapanis_saati
                 name: Kapanış Saati
+              - type: custom:xr15-channel-bar-card
+                entity: number.radion_xr15w_g5_pro_uv
+                name: UV
+                color: "#7c3aed"
+              - type: custom:xr15-channel-bar-card
+                entity: number.radion_xr15w_g5_pro_violet
+                name: Violet
+                color: "#a855f7"
+              - type: custom:xr15-channel-bar-card
+                entity: number.radion_xr15w_g5_pro_royal_blue
+                name: Royal Blue
+                color: "#1d4ed8"
+              - type: custom:xr15-channel-bar-card
+                entity: number.radion_xr15w_g5_pro_blue
+                name: Blue
+                color: "#3b82f6"
+              - type: custom:xr15-channel-bar-card
+                entity: number.radion_xr15w_g5_pro_green
+                name: Green
+                color: "#22c55e"
+              - type: custom:xr15-channel-bar-card
+                entity: number.radion_xr15w_g5_pro_red
+                name: Red
+                color: "#ef4444"
+              - type: custom:xr15-channel-bar-card
+                entity: number.radion_xr15w_g5_pro_moonlight_blue
+                name: Moonlight Blue
+                color: "#312e81"
+              - type: custom:xr15-channel-bar-card
+                entity: number.radion_xr15w_g5_pro_warm_white
+                name: Warm White
+                color: "#fbbf24"
+              - type: custom:xr15-channel-bar-card
+                entity: number.radion_xr15w_g5_pro_cool_white
+                name: Cool White
+                color: "#bae6fd"
+              - type: custom:xr15-channel-bar-card
+                entity: number.radion_xr15w_g5_pro_brightness
+                name: Brightness
+                color: "#f8fafc"
+              - type: button
+                entity: button.radion_xr15w_g5_pro_apply_schedule
+                name: Apply Schedule
+                icon: mdi:content-save-outline
+                tap_action:
+                  action: call-service
+                  service: button.press
+                  target:
+                    entity_id: button.radion_xr15w_g5_pro_apply_schedule
+                card_mod:
+                  style: |
+                    ha-card {
+                      background: linear-gradient(135deg,#04101f,#071b33);
+                      color: white;
+                      border-radius: 16px;
+                      border: 1px solid rgba(80,160,255,.35);
+                      box-shadow: 0 0 15px rgba(0,120,255,.15);
+                    }
           - type: vertical-stack
             view_layout:
               grid-column: 1 / -1

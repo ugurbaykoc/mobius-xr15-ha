@@ -9,7 +9,7 @@ from homeassistant.helpers.device_registry import DeviceInfo, format_mac
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .schedule import build_slots_from_entities, brightness_to_intensity
+from .schedule import build_flat_schedule, brightness_to_intensity
 
 
 async def async_setup_entry(
@@ -21,9 +21,9 @@ async def async_setup_entry(
 
 
 class MobiusXR15ApplyScheduleButton(ButtonEntity):
-    """Pushes the current slot/channel helper values to the device as its schedule.
+    """Pushes the current channel values to the device as its schedule.
 
-    The light entity already installs the current schedule whenever it
+    The light entity already installs the current recipe whenever it
     transitions off -> on. This button is for pushing edits while the
     light is already on, without a full off/on cycle.
     """
@@ -41,7 +41,7 @@ class MobiusXR15ApplyScheduleButton(ButtonEntity):
 
     async def async_press(self) -> None:
         store = self._hass.data[DOMAIN][self._entry_id]
-        slots = build_slots_from_entities(store["channel_numbers"], store["slot_times"])
+        slots = build_flat_schedule(store["channel_numbers"])
 
         light = store.get("light")
         intensity = brightness_to_intensity(light.brightness) if light and light.brightness else 500

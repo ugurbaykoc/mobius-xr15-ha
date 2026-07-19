@@ -11,7 +11,6 @@ from .const import DOMAIN
 PLATFORMS: list[Platform] = [
     Platform.LIGHT,
     Platform.NUMBER,
-    Platform.TIME,
     Platform.BUTTON,
 ]
 
