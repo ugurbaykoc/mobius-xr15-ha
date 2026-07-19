@@ -369,7 +369,7 @@ views:
                 entity: number.living_room_radion_xr15w_g5_pro_brightness
                 name: Brightness
                 color: "#f8fafc"
-              - type: button
+              - type: custom:button-card
                 entity: button.living_room_radion_xr15w_g5_pro_apply_schedule
                 name: Apply Schedule
                 icon: mdi:content-save-outline
@@ -378,15 +378,26 @@ views:
                   service: button.press
                   target:
                     entity_id: button.living_room_radion_xr15w_g5_pro_apply_schedule
-                card_mod:
-                  style: |
-                    ha-card {
-                      background: linear-gradient(135deg,#04101f,#071b33);
-                      color: white;
-                      border-radius: 16px;
-                      border: 1px solid rgba(80,160,255,.35);
-                      box-shadow: 0 0 15px rgba(0,120,255,.15);
-                    }
+                styles:
+                  card:
+                    - height: 64px
+                    - border-radius: 16px
+                    - background: linear-gradient(135deg,#04101f,#071b33)
+                    - border: 1px solid rgba(80,160,255,.35)
+                    - box-shadow: 0 0 15px rgba(0,120,255,.15)
+                    - color: white
+                    - display: flex
+                    - flex-direction: row
+                    - align-items: center
+                    - justify-content: center
+                    - gap: 10px
+                  icon:
+                    - width: 22px
+                    - color: "#60a5fa"
+                  name:
+                    - font-size: 13px
+                    - font-weight: bold
+                    - margin-top: 0px
           - type: vertical-stack
             view_layout:
               grid-column: 1 / -1
