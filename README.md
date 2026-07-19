@@ -168,7 +168,13 @@ The device's own onboard schedule already ramps brightness up and down across th
 - `xr15_schedule_helpers.yaml` — two `input_datetime` helpers (`radion_xr15_acilis_saati` / `radion_xr15_kapanis_saati`) for the on/off times, adjustable from the dashboard. Paste into `configuration.yaml`.
 - `xr15_schedule_automations.yaml` — two automations that call `light.turn_on`/`light.turn_off` at those times. Append to `automations.yaml`.
 
-`dashboards/akvaryum.yaml` is an example Lovelace dashboard (Turkish) that ties it together — a `light` tile with brightness control plus an entities card for the two time helpers. It also references several sensors/switches specific to one particular aquarium setup (temperature probe, ATO controller, leak sensor, KH controller) — treat it as a template to adapt, not a drop-in file.
+`dashboards/akvaryum.yaml` is an example Lovelace dashboard (Turkish) that ties it together — a `light` tile with brightness control plus two `xr15-time-picker-card` cards for the two time helpers. It also references several sensors/switches specific to one particular aquarium setup (temperature probe, ATO controller, leak sensor, KH controller) — treat it as a template to adapt, not a drop-in file.
+
+`www/xr15-time-picker-card.js` is a small self-contained custom Lovelace card (no dependencies, no build step) wrapping the browser's native `<input type="time">` for an `input_datetime` entity. On iOS Safari this renders as the OS's native scrolling wheel picker; other browsers fall back to their own time control (a plain box on desktop Chrome, a clock dial on Android) — the wheel look is a browser/OS behavior, not something any Lovelace card can force everywhere. To use it:
+
+1. Copy `www/xr15-time-picker-card.js` to your HA `config/www/` directory.
+2. Add it as a dashboard resource: **Settings → Dashboards → 3-dot menu → Resources → Add Resource**, URL `/local/xr15-time-picker-card.js`, type **JavaScript Module**.
+3. Use `type: custom:xr15-time-picker-card` with an `entity:` (and optional `name:`) in a card, as done in `dashboards/akvaryum.yaml`.
 
 ---
 
@@ -183,6 +189,8 @@ The device's own onboard schedule already ramps brightness up and down across th
 ├── xr15_schedule_automations.yaml    # optional: automations that follow those helpers
 ├── dashboards/
 │   └── akvaryum.yaml                 # example Lovelace dashboard (template, adapt to your setup)
+├── www/
+│   └── xr15-time-picker-card.js      # optional: native-wheel time picker card for the schedule
 └── custom_components/
     └── mobius_xr15/                  # native HA integration (recommended)
         ├── manifest.json
