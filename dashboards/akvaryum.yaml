@@ -1,0 +1,543 @@
+title: Akvaryum
+kiosk_mode:
+  hide_header: true
+  hide_sidebar: "{{ is_state(\"input_boolean.hide_sidebar\", \"on\") }}"
+views:
+  - title: Akvaryum
+    path: akvaryum
+    icon: mdi:fishbowl
+    panel: true
+    cards:
+      - type: custom:layout-card
+        layout_type: custom:grid-layout
+        layout:
+          grid-template-columns: 1fr 1fr 1fr
+          grid-template-rows: auto
+          grid-gap: 16px
+          mediaquery:
+            "(max-width: 1000px)":
+              grid-template-columns: 1fr 1fr
+            "(max-width: 600px)":
+              grid-template-columns: 1fr
+        cards:
+          - type: vertical-stack
+            view_layout:
+              grid-column: 1
+            cards:
+              - type: markdown
+                content: |
+                  # 🐠 AKVARYUM
+                  Canlı bir mercan resifi için akıllı kontrol 🪸
+                card_mod:
+                  style: |
+                    ha-card {
+                      background: linear-gradient(135deg,#020817,#07182d);
+                      color: white;
+                      border-radius: 22px;
+                      padding: 18px;
+                      box-shadow: 0 0 25px rgba(0,120,255,.25);
+                    }
+              - type: picture
+                image: local/aquarium.jpg
+                card_mod:
+                  style: |
+                    ha-card {
+                      border-radius: 22px;
+                      overflow: hidden;
+                      border: 1px solid rgba(80,160,255,.35);
+                      box-shadow: 0 0 25px rgba(0,120,255,.25);
+                    }
+              - type: gauge
+                entity: sensor.itc_308_su_sicakligi
+                name: Su Sıcaklığı
+                min: 23
+                max: 28
+                needle: true
+                severity:
+                  green: 24
+                  yellow: 26.5
+                  red: 27.5
+                card_mod:
+                  style: |
+                    ha-card {
+                      background: linear-gradient(135deg,#04101f,#071b33);
+                      color: white;
+                      border-radius: 22px;
+                      border: 1px solid rgba(80,160,255,.35);
+                      box-shadow: 0 0 25px rgba(0,120,255,.20);
+                      min-height: 180px;
+                    }
+              - type: custom:apexcharts-card
+                header:
+                  show: true
+                  title: Sıcaklık Geçmişi (24s)
+                graph_span: 24h
+                series:
+                  - entity: sensor.itc_308_su_sicakligi
+                    name: Su Sıcaklığı
+                    stroke_width: 3
+                    color: "#2f8cff"
+                apex_config:
+                  chart:
+                    height: 200
+                  grid:
+                    borderColor: "#1d3557"
+                card_mod:
+                  style: |
+                    ha-card {
+                      background: linear-gradient(135deg,#04101f,#071b33);
+                      color: white;
+                      border-radius: 22px;
+                      border: 1px solid rgba(80,160,255,.35);
+                      box-shadow: 0 0 25px rgba(0,120,255,.20);
+                    }
+          - type: vertical-stack
+            view_layout:
+              grid-column: 2
+            cards:
+              - type: markdown
+                content: |
+                  ## ⚡ GÜÇ & DURUM
+                card_mod:
+                  style: |
+                    ha-card {
+                      background: linear-gradient(135deg,#04101f,#071b33);
+                      color: white;
+                      border-radius: 22px;
+                      padding: 10px 18px;
+                      border: 1px solid rgba(80,160,255,.35);
+                      box-shadow: 0 0 25px rgba(0,120,255,.25);
+                    }
+              - type: horizontal-stack
+                cards:
+                  - type: custom:button-card
+                    entity: switch.akvaryummain
+                    name: Ana Güç
+                    icon: mdi:power
+                    tap_action:
+                      action: toggle
+                    styles:
+                      card:
+                        - height: 130px
+                        - border-radius: 18px
+                        - background: >-
+                            [[[ return states['switch.akvaryummain'].state ===
+                            'on'
+                              ? 'linear-gradient(135deg,#0a2a6e,#1a4fc4)'
+                              : 'linear-gradient(135deg,#4f0a0a,#801515)' ]]]
+                        - border: 1px solid rgba(80,160,255,.35)
+                        - box-shadow: 0 0 20px rgba(0,120,255,.25)
+                        - color: white
+                      icon:
+                        - width: 50px
+                        - color: >-
+                            [[[ return states['switch.akvaryummain'].state ===
+                            'on'
+                              ? '#2f8cff' : '#f87171' ]]]
+                      name:
+                        - font-size: 14px
+                        - font-weight: bold
+                  - type: custom:button-card
+                    entity: sensor.akvaryummain_current_consumption
+                    name: Tüketim
+                    icon: mdi:flash
+                    tap_action:
+                      action: none
+                    show_state: true
+                    styles:
+                      card:
+                        - height: 130px
+                        - border-radius: 18px
+                        - background: linear-gradient(135deg,#04101f,#071b33)
+                        - border: 1px solid rgba(80,160,255,.35)
+                        - box-shadow: 0 0 20px rgba(0,120,255,.20)
+                        - color: white
+                      icon:
+                        - width: 50px
+                        - color: "#fbbf24"
+                      name:
+                        - font-size: 14px
+                        - font-weight: bold
+                      state:
+                        - font-size: 16px
+                        - font-weight: bold
+                        - color: "#fbbf24"
+              - type: custom:button-card
+                entity: sensor.aquanix_son_mesaj
+                name: ATO — Su Tamamlama
+                icon: mdi:water-pump
+                show_state: true
+                tap_action:
+                  action: none
+                styles:
+                  card:
+                    - height: 140px
+                    - border-radius: 22px
+                    - background: >-
+                        [[[ return states['sensor.aquanix_son_mesaj'].state ===
+                        'OK'
+                          ? 'linear-gradient(135deg,#04101f,#071b33)'
+                          : 'linear-gradient(135deg,#4f0a0a,#801515)' ]]]
+                    - border: >-
+                        [[[ return states['sensor.aquanix_son_mesaj'].state ===
+                        'OK'
+                          ? '1px solid rgba(80,160,255,.35)'
+                          : '1px solid rgba(255,60,60,.6)' ]]]
+                    - box-shadow: >-
+                        [[[ return states['sensor.aquanix_son_mesaj'].state ===
+                        'OK'
+                          ? '0 0 25px rgba(0,120,255,.25)'
+                          : '0 0 30px rgba(255,60,60,.4)' ]]]
+                    - color: white
+                  icon:
+                    - width: 60px
+                    - color: >-
+                        [[[return states['sensor.aquanix_son_mesaj'].state ===
+                        'OK'
+                          ? '#2f8cff' : '#ff4444']]]
+                  name:
+                    - font-size: 15px
+                    - font-weight: bold
+                  state:
+                    - font-size: 14px
+                    - color: >-
+                        [[[return states['sensor.aquanix_son_mesaj'].state ===
+                        'OK'
+                          ? '#4caf50' : '#ff4444']]]
+              - type: custom:button-card
+                entity: binary_sensor.akvaryumsensor_moisture
+                name: SU KAÇAĞI
+                icon: mdi:water-alert
+                show_state: false
+                show_label: true
+                label: >-
+                  [[[return
+                  states['binary_sensor.akvaryumsensor_moisture'].state ===
+                  'off'
+                    ? '✅ Kuru — Sorun Yok' : '⚠️ KAÇAK TESPİT EDİLDİ!']]]
+                tap_action:
+                  action: none
+                styles:
+                  card:
+                    - height: 140px
+                    - border-radius: 22px
+                    - background: >-
+                        [[[ return
+                        states['binary_sensor.akvaryumsensor_moisture'].state
+                        === 'off'
+                          ? 'linear-gradient(135deg,#04101f,#071b33)'
+                          : 'linear-gradient(135deg,#4f0a0a,#801515)' ]]]
+                    - border: >-
+                        [[[ return
+                        states['binary_sensor.akvaryumsensor_moisture'].state
+                        === 'off'
+                          ? '1px solid rgba(80,160,255,.35)'
+                          : '1px solid rgba(255,60,60,.6)' ]]]
+                    - box-shadow: >-
+                        [[[ return
+                        states['binary_sensor.akvaryumsensor_moisture'].state
+                        === 'off'
+                          ? '0 0 25px rgba(0,120,255,.25)'
+                          : '0 0 35px rgba(255,60,60,.6)' ]]]
+                    - color: white
+                  icon:
+                    - width: 65px
+                    - color: >-
+                        [[[return
+                        states['binary_sensor.akvaryumsensor_moisture'].state
+                        === 'off'
+                          ? '#2f8cff' : '#ff4444']]]
+                  name:
+                    - font-size: 16px
+                    - font-weight: bold
+                  label:
+                    - font-size: 13px
+                    - color: >-
+                        [[[return
+                        states['binary_sensor.akvaryumsensor_moisture'].state
+                        === 'off'
+                          ? '#4caf50' : '#ff4444']]]
+              - type: entities
+                title: Hızlı Bilgiler
+                entities:
+                  - entity: sensor.itc_308_su_sicakligi
+                    name: Su Sıcaklığı
+                    icon: mdi:thermometer-water
+                  - entity: switch.akvaryummain
+                    name: Ana Güç
+                    icon: mdi:power
+                  - entity: sensor.akvaryummain_current_consumption
+                    name: Anlık Tüketim
+                    icon: mdi:flash
+                  - entity: light.radion_xr15w_g5_pro
+                    name: Radion XR15
+                    icon: mdi:led-strip-variant
+                  - entity: sensor.aquanix_son_mesaj
+                    name: ATO Durumu
+                    icon: mdi:water-pump
+                  - entity: binary_sensor.akvaryumsensor_moisture
+                    name: Su Kaçağı
+                    icon: mdi:water-alert
+                  - entity: binary_sensor.akvaryumsensor_battery
+                    name: Sensör Bataryası
+                    icon: mdi:battery
+                card_mod:
+                  style: |
+                    ha-card {
+                      background: linear-gradient(135deg,#04101f,#071b33);
+                      color: white;
+                      border-radius: 22px;
+                      border: 1px solid rgba(80,160,255,.35);
+                      box-shadow: 0 0 25px rgba(0,120,255,.20);
+                    }
+          - type: vertical-stack
+            view_layout:
+              grid-column: 3
+            cards:
+              - type: markdown
+                content: |
+                  ## 💡 RADION XR15
+                card_mod:
+                  style: |
+                    ha-card {
+                      background: linear-gradient(135deg,#04101f,#071b33);
+                      color: white;
+                      border-radius: 22px;
+                      padding: 10px 18px;
+                      border: 1px solid rgba(80,160,255,.35);
+                      box-shadow: 0 0 25px rgba(0,120,255,.25);
+                    }
+              - type: tile
+                entity: light.radion_xr15w_g5_pro
+                name: Radion XR15
+                icon: mdi:led-strip-variant
+                vertical: false
+                features:
+                  - type: light-brightness
+                card_mod:
+                  style: |
+                    ha-card {
+                      background: linear-gradient(135deg,#04101f,#071b33);
+                      color: white;
+                      border-radius: 22px;
+                      border: 1px solid rgba(80,160,255,.35);
+                      box-shadow: 0 0 25px rgba(0,120,255,.20);
+                    }
+              - type: entities
+                title: Otomatik Zamanlama
+                entities:
+                  - entity: input_datetime.radion_xr15_acilis_saati
+                    name: Açılış Saati
+                    icon: mdi:weather-sunset-up
+                  - entity: input_datetime.radion_xr15_kapanis_saati
+                    name: Kapanış Saati
+                    icon: mdi:weather-sunset-down
+                card_mod:
+                  style: |
+                    ha-card {
+                      background: linear-gradient(135deg,#04101f,#071b33);
+                      color: white;
+                      border-radius: 22px;
+                      border: 1px solid rgba(80,160,255,.35);
+                      box-shadow: 0 0 25px rgba(0,120,255,.20);
+                    }
+          - type: vertical-stack
+            view_layout:
+              grid-column: 1 / -1
+            cards:
+              - type: markdown
+                content: |
+                  ## 🌊 AQUAWIZ KH CONTROLLER
+                card_mod:
+                  style: |
+                    ha-card {
+                      background: linear-gradient(135deg,#04101f,#071b33);
+                      color: white;
+                      border-radius: 22px;
+                      padding: 10px 18px;
+                      border: 1px solid rgba(80,160,255,.35);
+                      box-shadow: 0 0 25px rgba(0,120,255,.25);
+                    }
+              - type: horizontal-stack
+                cards:
+                  - type: custom:button-card
+                    entity: >-
+                      sensor.aquawiz_kh_controller_kh1_00_04093_aquawiz_kh1_00_04093_kh_degeri_ham
+                    name: KH Değeri
+                    icon: mdi:water-check
+                    show_state: true
+                    tap_action:
+                      action: none
+                    styles:
+                      card:
+                        - height: 130px
+                        - border-radius: 18px
+                        - background: linear-gradient(135deg,#04101f,#071b33)
+                        - border: 1px solid rgba(80,160,255,.35)
+                        - box-shadow: 0 0 20px rgba(0,120,255,.20)
+                        - color: white
+                      icon:
+                        - width: 50px
+                        - color: "#48cae4"
+                      name:
+                        - font-size: 14px
+                        - font-weight: bold
+                      state:
+                        - font-size: 16px
+                        - font-weight: bold
+                        - color: "#48cae4"
+                  - type: custom:button-card
+                    entity: >-
+                      sensor.aquawiz_kh_controller_kh1_00_04093_aquawiz_kh1_00_04093_hedef_kh_ham
+                    name: Hedef KH
+                    icon: mdi:target
+                    show_state: true
+                    tap_action:
+                      action: none
+                    styles:
+                      card:
+                        - height: 130px
+                        - border-radius: 18px
+                        - background: linear-gradient(135deg,#04101f,#071b33)
+                        - border: 1px solid rgba(80,160,255,.35)
+                        - box-shadow: 0 0 20px rgba(0,120,255,.20)
+                        - color: white
+                      icon:
+                        - width: 50px
+                        - color: "#8ecae6"
+                      name:
+                        - font-size: 14px
+                        - font-weight: bold
+                      state:
+                        - font-size: 16px
+                        - font-weight: bold
+                        - color: "#8ecae6"
+                  - type: custom:button-card
+                    entity: >-
+                      sensor.aquawiz_kh_controller_kh1_00_04093_aquawiz_kh1_00_04093_ph_degeri
+                    name: pH Değeri
+                    icon: mdi:flask
+                    show_state: true
+                    tap_action:
+                      action: none
+                    styles:
+                      card:
+                        - height: 130px
+                        - border-radius: 18px
+                        - background: linear-gradient(135deg,#04101f,#071b33)
+                        - border: 1px solid rgba(80,160,255,.35)
+                        - box-shadow: 0 0 20px rgba(0,120,255,.20)
+                        - color: white
+                      icon:
+                        - width: 50px
+                        - color: "#ffb703"
+                      name:
+                        - font-size: 14px
+                        - font-weight: bold
+                      state:
+                        - font-size: 16px
+                        - font-weight: bold
+                        - color: "#ffb703"
+              - type: custom:apexcharts-card
+                header:
+                  show: true
+                  title: KH / pH Geçmişi
+                  show_states: true
+                graph_span: 48h
+                yaxis:
+                  - min: 6
+                    max: 10
+                    decimals: 1
+                series:
+                  - entity: >-
+                      sensor.aquawiz_kh_controller_kh1_00_04093_aquawiz_kh1_00_04093_kh_degeri_ham
+                    name: KH
+                    color: "#48cae4"
+                    stroke_width: 2
+                  - entity: >-
+                      sensor.aquawiz_kh_controller_kh1_00_04093_aquawiz_kh1_00_04093_ph_degeri
+                    name: pH
+                    color: "#8ecae6"
+                    stroke_width: 2
+                  - entity: >-
+                      sensor.aquawiz_kh_controller_kh1_00_04093_aquawiz_kh1_00_04093_ph_orijinal
+                    name: pH (Orijinal)
+                    color: "#ffb703"
+                    stroke_width: 2
+                apex_config:
+                  chart:
+                    height: 200
+                    background: transparent
+                  grid:
+                    borderColor: "#1e3a5f"
+                card_mod:
+                  style: |
+                    ha-card {
+                      background: linear-gradient(135deg,#04101f,#071b33);
+                      color: white;
+                      border-radius: 22px;
+                      border: 1px solid rgba(80,160,255,.35);
+                      box-shadow: 0 0 25px rgba(0,120,255,.20);
+                    }
+              - type: horizontal-stack
+                cards:
+                  - type: custom:button-card
+                    entity: >-
+                      sensor.aquawiz_kh_controller_kh1_00_04093_aquawiz_kh1_00_04093_dozaj_durumu
+                    name: Dozaj
+                    show_state: true
+                    styles:
+                      card:
+                        - background: "#0f2942"
+                        - border-radius: 10px
+                      name:
+                        - color: "#8ecae6"
+                        - font-size: 11px
+                      state:
+                        - color: "#ffffff"
+                        - font-size: 16px
+                  - type: custom:button-card
+                    entity: >-
+                      sensor.aquawiz_kh_controller_kh1_00_04093_aquawiz_kh1_00_04093_cihaz_durumu
+                    name: Durum
+                    show_state: true
+                    styles:
+                      card:
+                        - background: "#0f2942"
+                        - border-radius: 10px
+                      name:
+                        - color: "#8ecae6"
+                        - font-size: 11px
+                      state:
+                        - color: "#ffffff"
+                        - font-size: 16px
+                  - type: custom:button-card
+                    entity: >-
+                      sensor.aquawiz_kh_controller_kh1_00_04093_aquawiz_kh1_00_04093_hata_sayaci
+                    name: Hata
+                    show_state: true
+                    styles:
+                      card:
+                        - background: "#0f2942"
+                        - border-radius: 10px
+                      name:
+                        - color: "#8ecae6"
+                        - font-size: 11px
+                      state:
+                        - color: "#ffffff"
+                        - font-size: 16px
+          - type: markdown
+            view_layout:
+              grid-column: 1 / -1
+            content: >
+              🪸 Akvaryumunuzun sağlığı için düzenli kontrol ve bakım yapmayı
+              unutmayın. 💙
+            card_mod:
+              style: |
+                ha-card {
+                  background: linear-gradient(135deg,#04101f,#071b33);
+                  color: white;
+                  border-radius: 18px;
+                  border: 1px solid rgba(80,160,255,.35);
+                  padding: 10px;
+                }

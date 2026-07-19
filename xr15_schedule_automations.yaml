@@ -1,0 +1,32 @@
+# Optional: automatically turn the Radion XR15 on/off at the times set in
+# xr15_schedule_helpers.yaml's input_datetime helpers. Append these two
+# entries to your automations.yaml list (the file automation: !include
+# automations.yaml already points at).
+#
+# The device's own onboard schedule (protocol.py / xr15_server.py's
+# build_original_schedule) already ramps brightness up and down across the
+# day once the light is on - these automations only handle the on/off
+# press itself, e.g. for a full blackout period overnight.
+- id: xr15_auto_on
+  alias: "Radion XR15 - Otomatik Aç"
+  trigger:
+    - platform: time
+      at: input_datetime.radion_xr15_acilis_saati
+  condition: []
+  action:
+    - service: light.turn_on
+      target:
+        entity_id: light.radion_xr15w_g5_pro
+  mode: single
+
+- id: xr15_auto_off
+  alias: "Radion XR15 - Otomatik Kapat"
+  trigger:
+    - platform: time
+      at: input_datetime.radion_xr15_kapanis_saati
+  condition: []
+  action:
+    - service: light.turn_off
+      target:
+        entity_id: light.radion_xr15w_g5_pro
+  mode: single

@@ -159,24 +159,39 @@ It uses Home Assistant's own Bluetooth integration for the connection (via `blea
 
 > ⚠️ HA needs Bluetooth visibility of the light — either it runs on a machine with a local BT adapter in range, or you have an [ESPHome Bluetooth proxy](https://esphome.io/components/bluetooth_proxy.html) covering the aquarium.
 
+If HA runs in Docker, this also means the container needs `network_mode: host`, the host's D-Bus socket bind-mounted (`-v /run/dbus:/run/dbus:ro`), and `NET_ADMIN`/`NET_RAW` capabilities (`--cap-add=NET_ADMIN --cap-add=NET_RAW`) for BlueZ adapter management — plus the host's own `bluetooth.service` actually running (`sudo systemctl enable --now bluetooth`).
+
+#### Optional: automatic daily on/off schedule
+
+The device's own onboard schedule already ramps brightness up and down across the day once the light is on. If you also want it to turn fully on/off at set times (e.g. a full blackout overnight), two files are provided:
+
+- `xr15_schedule_helpers.yaml` — two `input_datetime` helpers (`radion_xr15_acilis_saati` / `radion_xr15_kapanis_saati`) for the on/off times, adjustable from the dashboard. Paste into `configuration.yaml`.
+- `xr15_schedule_automations.yaml` — two automations that call `light.turn_on`/`light.turn_off` at those times. Append to `automations.yaml`.
+
+`dashboards/akvaryum.yaml` is an example Lovelace dashboard (Turkish) that ties it together — a `light` tile with brightness control plus an entities card for the two time helpers. It also references several sensors/switches specific to one particular aquarium setup (temperature probe, ATO controller, leak sensor, KH controller) — treat it as a template to adapt, not a drop-in file.
+
 ---
 
 ## Files
 
 ```
 .
-├── xr15_server.py              # BLE HTTP bridge (standalone script, for the rest_command setup)
-├── xr15.service                # systemd service for xr15_server.py
-├── ha_config.yaml              # HA configuration.yaml snippet for the rest_command setup
+├── xr15_server.py                    # BLE HTTP bridge (standalone script, for the rest_command setup)
+├── xr15.service                      # systemd service for xr15_server.py
+├── ha_config.yaml                    # HA configuration.yaml snippet for the rest_command setup
+├── xr15_schedule_helpers.yaml        # optional: input_datetime helpers for auto on/off times
+├── xr15_schedule_automations.yaml    # optional: automations that follow those helpers
+├── dashboards/
+│   └── akvaryum.yaml                 # example Lovelace dashboard (template, adapt to your setup)
 └── custom_components/
-    └── mobius_xr15/            # native HA integration (recommended)
+    └── mobius_xr15/                  # native HA integration (recommended)
         ├── manifest.json
         ├── __init__.py
-        ├── config_flow.py      # UI setup: enter the light's MAC address
+        ├── config_flow.py            # UI setup: enter the light's MAC address
         ├── const.py
-        ├── protocol.py         # pure C2 protocol packet builders (no I/O)
-        ├── client.py           # BLE transport (bleak-retry-connector)
-        ├── light.py            # light.radion_xr15w_g5_pro entity
+        ├── protocol.py               # pure C2 protocol packet builders (no I/O)
+        ├── client.py                 # BLE transport (bleak-retry-connector)
+        ├── light.py                  # light.radion_xr15w_g5_pro entity
         └── strings.json / translations/en.json
 ```
 

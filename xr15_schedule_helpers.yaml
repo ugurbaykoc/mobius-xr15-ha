@@ -1,0 +1,19 @@
+# Optional: time-of-day helpers for automatically turning the Radion XR15
+# on/off. Paste this block into your configuration.yaml (or merge it into
+# an existing input_datetime: section if you already have one).
+#
+# Entity IDs are fixed by the keys below, so they match
+# xr15_schedule_automations.yaml and dashboards/akvaryum.yaml exactly:
+#   input_datetime.radion_xr15_acilis_saati
+#   input_datetime.radion_xr15_kapanis_saati
+input_datetime:
+  radion_xr15_acilis_saati:
+    name: "Radion XR15 Açılış Saati"
+    has_time: true
+    has_date: false
+    initial: "08:00:00"
+  radion_xr15_kapanis_saati:
+    name: "Radion XR15 Kapanış Saati"
+    has_time: true
+    has_date: false
+    initial: "23:00:00"
