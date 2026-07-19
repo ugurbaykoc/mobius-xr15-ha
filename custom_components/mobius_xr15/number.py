@@ -1,7 +1,7 @@
 """Per-slot, per-channel value controls for the Mobius XR15 schedule."""
 from __future__ import annotations
 
-from homeassistant.components.number import NumberEntity, NumberMode, RestoreNumber
+from homeassistant.components.number import NumberMode, RestoreNumber
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_MAC
 from homeassistant.core import HomeAssistant
@@ -26,7 +26,7 @@ async def async_setup_entry(
     hass.data[DOMAIN][entry.entry_id]["channel_numbers"] = entities
 
 
-class MobiusXR15ChannelNumber(NumberEntity, RestoreNumber):
+class MobiusXR15ChannelNumber(RestoreNumber):
     """One channel's target value at one schedule slot (0-1000)."""
 
     _attr_has_entity_name = True
