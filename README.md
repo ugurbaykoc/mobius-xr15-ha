@@ -145,11 +145,19 @@ tap_action:
   action: toggle
 ```
 
-### 7. (Optional) HA Custom Component
+### 7. (Recommended) HA Custom Component
 
-For a cleaner integration without `rest_command`, copy `custom_components/mobius_xr15/` to your HA config directory and add via **Settings → Integrations**.
+For a native integration without `rest_command` or a separate bridge process, copy `custom_components/mobius_xr15/` into your HA `config/custom_components/` directory, restart HA, then add it via **Settings → Devices & Services → Add Integration → "Mobius XR15"** and enter the light's MAC address.
 
-> ⚠️ The custom component requires HA to run on the same machine as the BLE adapter, or on a machine with direct BLE access to the light.
+This adds a real `light.radion_xr15w_g5_pro` entity:
+- **On** restores the schedule (same reverse-engineered program as above) and resumes playback.
+- **Off** writes an all-zero schedule.
+- **Brightness** maps directly to the device's `Schedule1Intensity` attribute (0–1000 on the wire ↔ 0–255 in HA). Adjusting brightness while the light is already on only retargets intensity — it doesn't rewrite the whole schedule.
+- State is optimistic (the device has no reliable readback over this protocol) and is restored across HA restarts.
+
+It uses Home Assistant's own Bluetooth integration for the connection (via `bleak-retry-connector`), so:
+
+> ⚠️ HA needs Bluetooth visibility of the light — either it runs on a machine with a local BT adapter in range, or you have an [ESPHome Bluetooth proxy](https://esphome.io/components/bluetooth_proxy.html) covering the aquarium.
 
 ---
 
@@ -157,15 +165,19 @@ For a cleaner integration without `rest_command`, copy `custom_components/mobius
 
 ```
 .
-├── xr15_server.py              # BLE HTTP bridge (main file)
-├── xr15.service                # systemd service
-├── ha_config.yaml              # HA configuration.yaml snippet
+├── xr15_server.py              # BLE HTTP bridge (standalone script, for the rest_command setup)
+├── xr15.service                # systemd service for xr15_server.py
+├── ha_config.yaml              # HA configuration.yaml snippet for the rest_command setup
 └── custom_components/
-    └── mobius_xr15/
+    └── mobius_xr15/            # native HA integration (recommended)
         ├── manifest.json
         ├── __init__.py
-        ├── config_flow.py
-        └── light.py
+        ├── config_flow.py      # UI setup: enter the light's MAC address
+        ├── const.py
+        ├── protocol.py         # pure C2 protocol packet builders (no I/O)
+        ├── client.py           # BLE transport (bleak-retry-connector)
+        ├── light.py            # light.radion_xr15w_g5_pro entity
+        └── strings.json / translations/en.json
 ```
 
 ---
