@@ -15,8 +15,8 @@ from .protocol import build_intensity_sequence, build_write_sequence
 _LOGGER = logging.getLogger(__name__)
 
 WRITE_DELAY = 0.3
-SERVICE_RESOLUTION_DELAY = 1.5
-CONNECT_ATTEMPTS = 3
+SERVICE_RESOLUTION_DELAY = 2.0
+CONNECT_ATTEMPTS = 6
 
 
 class MobiusXR15Client:
