@@ -84,8 +84,21 @@ class MobiusXR15Client:
                 except Exception as err:  # notifications aren't required for control
                     _LOGGER.debug("Could not start notify: %s", err)
 
+                tx_char = client.services.get_characteristic(TX_FINAL_UUID)
+                # Prefer an acknowledged write (waits for the peripheral's GATT
+                # response) when the characteristic supports it - on a weak
+                # link, write-without-response can silently drop a packet with
+                # no error at all, since there's nothing to confirm delivery.
+                use_response = tx_char is not None and "write" in tx_char.properties
+                _LOGGER.debug(
+                    "%s: TX characteristic properties=%s, write-with-response=%s",
+                    self._address,
+                    tx_char.properties if tx_char else None,
+                    use_response,
+                )
+
                 for packet in packets:
-                    await client.write_gatt_char(TX_FINAL_UUID, packet, response=False)
+                    await client.write_gatt_char(TX_FINAL_UUID, packet, response=use_response)
                     await asyncio.sleep(WRITE_DELAY)
             finally:
                 await client.disconnect()
