@@ -33,7 +33,7 @@ class MobiusXR15Client:
         """Retarget overall intensity without rewriting the schedule."""
         await self._send(build_intensity_sequence(intensity))
 
-    async def _connect(self) -> BleakClientWithServiceCache:
+    async def _connect(self, force_fresh: bool = False) -> BleakClientWithServiceCache:
         ble_device = bluetooth.async_ble_device_from_address(
             self._hass, self._address, connectable=True
         )
@@ -41,11 +41,39 @@ class MobiusXR15Client:
             raise RuntimeError(
                 f"{self._address} is not visible to Home Assistant's bluetooth integration"
             )
-        return await establish_connection(BleakClientWithServiceCache, ble_device, self._address)
+        return await establish_connection(
+            BleakClientWithServiceCache,
+            ble_device,
+            self._address,
+            use_services_cache=not force_fresh,
+        )
+
+    async def _connect_verified(self) -> BleakClientWithServiceCache:
+        """Connect and confirm the write characteristic is actually present.
+
+        A stale cached service list (e.g. from a flaky discovery on a weak
+        BLE signal) can leave establish_connection "succeeding" without the
+        characteristic we need. Detect that and force one fresh reconnect.
+        """
+        client = await self._connect()
+        if client.services.get_characteristic(TX_FINAL_UUID) is not None:
+            return client
+
+        _LOGGER.warning(
+            "%s: TX characteristic missing from cached services, reconnecting fresh",
+            self._address,
+        )
+        await client.clear_cache()
+        await client.disconnect()
+        client = await self._connect(force_fresh=True)
+        if client.services.get_characteristic(TX_FINAL_UUID) is None:
+            await client.disconnect()
+            raise RuntimeError(f"TX characteristic {TX_FINAL_UUID} not found on {self._address}")
+        return client
 
     async def _send(self, packets: list[bytes]) -> None:
         async with self._lock:
-            client = await self._connect()
+            client = await self._connect_verified()
             try:
                 def _noop(_char, _data) -> None:
                     return None
