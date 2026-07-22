@@ -20,7 +20,16 @@ CONNECT_ATTEMPTS = 6
 
 
 class MobiusXR15Client:
-    """Serializes BLE writes to a single Mobius XR15 device."""
+    """Serializes BLE writes to a single Mobius XR15 device.
+
+    Every operation (connect, verify the write characteristic is actually
+    present, write all packets) is retried together as one unit, up to
+    CONNECT_ATTEMPTS times. Earlier versions only retried the connect step,
+    so a write that failed partway through the packet sequence - a real
+    possibility on a marginal signal - would just fail outright with
+    nothing to catch it. Retrying the whole cycle means a mid-write drop
+    gets a genuine fresh attempt instead.
+    """
 
     def __init__(self, hass: HomeAssistant, address: str) -> None:
         self._hass = hass
@@ -35,7 +44,10 @@ class MobiusXR15Client:
         """Retarget overall intensity without rewriting the schedule."""
         await self._send(build_intensity_sequence(intensity))
 
-    async def _connect(self, force_fresh: bool = False) -> BleakClientWithServiceCache:
+    def _on_disconnected(self, _client: BleakClientWithServiceCache) -> None:
+        _LOGGER.debug("%s: BLE disconnected", self._address)
+
+    async def _connect(self, force_fresh: bool) -> BleakClientWithServiceCache:
         ble_device = bluetooth.async_ble_device_from_address(
             self._hass, self._address, connectable=True
         )
@@ -47,6 +59,7 @@ class MobiusXR15Client:
             BleakClientWithServiceCache,
             ble_device,
             self._address,
+            disconnected_callback=self._on_disconnected,
             use_services_cache=not force_fresh,
         )
         # BlueZ resolves GATT services asynchronously after the connection
@@ -56,63 +69,70 @@ class MobiusXR15Client:
         await asyncio.sleep(SERVICE_RESOLUTION_DELAY)
         return client
 
-    async def _connect_verified(self) -> BleakClientWithServiceCache:
-        """Connect and confirm the write characteristic is actually present.
+    async def _write_packets(
+        self, client: BleakClientWithServiceCache, packets: list[bytes]
+    ) -> None:
+        tx_char = client.services.get_characteristic(TX_FINAL_UUID)
+        if tx_char is None:
+            raise RuntimeError(f"TX characteristic {TX_FINAL_UUID} not found on {self._address}")
 
-        A stale or not-yet-resolved service list can leave establish_connection
-        "succeeding" without the characteristic we need. Detect that and
-        retry with a forced fresh (cache-bypassing) reconnect.
-        """
-        last_error: Exception | None = None
-        client: BleakClientWithServiceCache | None = None
-        for attempt in range(1, CONNECT_ATTEMPTS + 1):
-            client = await self._connect(force_fresh=attempt > 1)
-            if client.services.get_characteristic(TX_FINAL_UUID) is not None:
-                return client
+        def _noop(_char, _data) -> None:
+            return None
 
-            _LOGGER.warning(
-                "%s: TX characteristic missing from services (attempt %s/%s), retrying fresh",
-                self._address,
-                attempt,
-                CONNECT_ATTEMPTS,
-            )
-            last_error = RuntimeError(
-                f"TX characteristic {TX_FINAL_UUID} not found on {self._address}"
-            )
-            await client.clear_cache()
-            await client.disconnect()
+        try:
+            await client.start_notify(RX_DATA_UUID, _noop)
+            await client.start_notify(RX_FINAL_UUID, _noop)
+        except Exception as err:  # notifications aren't required for control
+            _LOGGER.debug("%s: could not start notify: %s", self._address, err)
 
-        assert last_error is not None
-        raise last_error
+        # Prefer an acknowledged write (waits for the peripheral's GATT
+        # response) when the characteristic supports it - on a weak link,
+        # write-without-response can silently drop a packet with no error
+        # at all, since there's nothing to confirm delivery.
+        use_response = "write" in tx_char.properties
+        _LOGGER.debug(
+            "%s: TX characteristic properties=%s, write-with-response=%s",
+            self._address,
+            tx_char.properties,
+            use_response,
+        )
+
+        for packet in packets:
+            await client.write_gatt_char(TX_FINAL_UUID, packet, response=use_response)
+            await asyncio.sleep(WRITE_DELAY)
 
     async def _send(self, packets: list[bytes]) -> None:
         async with self._lock:
-            client = await self._connect_verified()
-            try:
-                def _noop(_char, _data) -> None:
-                    return None
-
+            last_error: Exception = RuntimeError(f"could not reach {self._address}")
+            for attempt in range(1, CONNECT_ATTEMPTS + 1):
+                client: BleakClientWithServiceCache | None = None
                 try:
-                    await client.start_notify(RX_DATA_UUID, _noop)
-                    await client.start_notify(RX_FINAL_UUID, _noop)
-                except Exception as err:  # notifications aren't required for control
-                    _LOGGER.debug("Could not start notify: %s", err)
+                    client = await self._connect(force_fresh=attempt > 1)
+                    await self._write_packets(client, packets)
+                    return
+                except Exception as err:  # noqa: BLE001 - deliberately broad, see retry loop
+                    last_error = err
+                    _LOGGER.warning(
+                        "%s: attempt %s/%s failed: %s",
+                        self._address,
+                        attempt,
+                        CONNECT_ATTEMPTS,
+                        err,
+                    )
+                    if client is not None:
+                        try:
+                            await client.clear_cache()
+                        except Exception as cache_err:
+                            _LOGGER.debug("%s: clear_cache failed: %s", self._address, cache_err)
+                finally:
+                    if client is not None:
+                        try:
+                            await client.disconnect()
+                        except Exception as disconnect_err:
+                            _LOGGER.debug(
+                                "%s: disconnect after attempt failed: %s",
+                                self._address,
+                                disconnect_err,
+                            )
 
-                tx_char = client.services.get_characteristic(TX_FINAL_UUID)
-                # Prefer an acknowledged write (waits for the peripheral's GATT
-                # response) when the characteristic supports it - on a weak
-                # link, write-without-response can silently drop a packet with
-                # no error at all, since there's nothing to confirm delivery.
-                use_response = tx_char is not None and "write" in tx_char.properties
-                _LOGGER.debug(
-                    "%s: TX characteristic properties=%s, write-with-response=%s",
-                    self._address,
-                    tx_char.properties if tx_char else None,
-                    use_response,
-                )
-
-                for packet in packets:
-                    await client.write_gatt_char(TX_FINAL_UUID, packet, response=use_response)
-                    await asyncio.sleep(WRITE_DELAY)
-            finally:
-                await client.disconnect()
+            raise last_error

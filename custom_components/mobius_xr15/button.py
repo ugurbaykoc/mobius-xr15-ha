@@ -44,6 +44,9 @@ class MobiusXR15ApplyScheduleButton(ButtonEntity):
         slots = build_flat_schedule(store["channel_numbers"])
 
         light = store.get("light")
-        intensity = brightness_to_intensity(light.brightness) if light and light.brightness else 500
+        if light is not None and light.brightness is not None:
+            intensity = brightness_to_intensity(light.brightness)
+        else:
+            intensity = 500
 
         await store["client"].async_write_schedule(slots, intensity)

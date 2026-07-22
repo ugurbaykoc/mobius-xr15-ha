@@ -151,7 +151,7 @@ For a native integration without `rest_command` or a separate bridge process, co
 
 This adds a real `light.radion_xr15w_g5_pro` entity, plus a set of color-recipe entities:
 - **On** installs the current color recipe (see below) across the device's original 11 time points and resumes playback — the day/night dimming shape from the original reverse-engineered schedule is preserved, but every point now carries the same flat color mix rather than a distinct ramp.
-- **Off** writes an all-zero schedule.
+- **Off** writes a well-formed all-zero schedule (real channel IDs, value 0, correct flags — not raw zero bytes, which the device silently ignores as malformed; see Troubleshooting below).
 - **Brightness** maps directly to the device's `Schedule1Intensity` attribute (0–1000 on the wire ↔ 0–255 in HA) — an overall multiplier on top of the recipe. Adjusting brightness while the light is already on only retargets intensity — it doesn't rewrite the schedule.
 - State is optimistic (the device has no reliable readback over this protocol) and is restored across HA restarts.
 
@@ -165,7 +165,17 @@ It uses Home Assistant's own Bluetooth integration for the connection (via `blea
 
 > ⚠️ HA needs Bluetooth visibility of the light — either it runs on a machine with a local BT adapter in range, or you have an [ESPHome Bluetooth proxy](https://esphome.io/components/bluetooth_proxy.html) covering the aquarium.
 
-If HA runs in Docker, this also means the container needs `network_mode: host`, the host's D-Bus socket bind-mounted (`-v /run/dbus:/run/dbus:ro`), and `NET_ADMIN`/`NET_RAW` capabilities (`--cap-add=NET_ADMIN --cap-add=NET_RAW`) for BlueZ adapter management — plus the host's own `bluetooth.service` actually running (`sudo systemctl enable --now bluetooth`).
+If HA runs in Docker, this also means the container needs `network_mode: host`, the host's D-Bus socket bind-mounted (`-v /run/dbus:/run/dbus:ro`), and full `--privileged` access (granular `--cap-add=NET_ADMIN --cap-add=NET_RAW` covers basic adapter management but not BlueZ's lower-level management socket, used for connection parameter negotiation — `--privileged` is the reliable way to get all of it) — plus the host's own `bluetooth.service` actually running (`sudo systemctl enable --now bluetooth`).
+
+#### Troubleshooting a marginal BLE connection
+
+If HA and the light's Bluetooth adapter aren't close together, expect a genuinely weak link (RSSI in the -75 to -85 dBm range is usable but flaky, not comfortable). The integration is built to tolerate this rather than assume a clean connection:
+
+- **`client.py` retries the entire connect→verify→write cycle up to 6 times per command**, not just the initial connection — a write that fails partway through (a real possibility on a weak signal) gets a genuine fresh retry, not a silent failure. Each attempt includes a deliberate ~2s pause after connecting before touching any characteristics, since BlueZ resolves GATT services asynchronously and can report "connected" before that resolution has actually finished.
+- **Acknowledged writes are used automatically when the device's characteristic supports them.** Unacknowledged writes (`write-without-response`) can silently drop a packet on a weak link with zero error anywhere — nothing to catch, nothing logged, the device just never gets that packet. `client.py` checks the characteristic's advertised properties and uses an acknowledged write when possible, so a dropped packet actually raises an error the retry loop can catch instead of vanishing.
+- **A `sensor.*` entity ("Signal Strength", diagnostic category) shows the light's last-seen RSSI** directly from HA's own passive Bluetooth scanning, independent of whether a GATT connection is currently open. Check it before assuming a code problem — a run of failures that lines up with a worse RSSI reading points at the physical link, not the integration.
+- **If retries alone aren't enough**, the real fix is physical: reduce the distance/obstructions between the Bluetooth adapter and the light (move the Pi, add a USB adapter on a short extension cable nearer the tank) or add an [ESPHome Bluetooth proxy](https://esphome.io/components/bluetooth_proxy.html) close to the aquarium so HA has a strong local connection instead of reaching across a room. Software retries can only paper over a weak signal so much.
+- To see exactly what the client is doing on each attempt, enable debug logging (Developer Tools → Actions → `logger.set_level` with `custom_components.mobius_xr15.client: debug`, or the equivalent `logger:` block in `configuration.yaml`) and watch for `TX characteristic properties=...` / `attempt N/6 failed: ...` lines.
 
 #### Optional: automatic daily on/off schedule
 
@@ -210,10 +220,11 @@ To use either:
         ├── const.py
         ├── protocol.py               # pure C2 protocol packet builders (no I/O)
         ├── schedule.py               # builds the flat schedule from the color entities
-        ├── client.py                 # BLE transport (bleak-retry-connector)
+        ├── client.py                 # BLE transport (bleak-retry-connector, retries whole op)
         ├── light.py                  # light.radion_xr15w_g5_pro entity
         ├── number.py                 # per-channel color recipe entities (10)
         ├── button.py                 # "Apply Schedule" action
+        ├── sensor.py                 # signal strength (RSSI) diagnostic entity
         └── strings.json / translations/en.json
 ```
 
