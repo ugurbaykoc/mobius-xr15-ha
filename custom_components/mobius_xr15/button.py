@@ -23,9 +23,9 @@ async def async_setup_entry(
 class MobiusXR15ApplyScheduleButton(ButtonEntity):
     """Pushes the current channel values to the device as its schedule.
 
-    The light entity already installs the current recipe whenever it
-    transitions off -> on. This button is for pushing edits while the
-    light is already on, without a full off/on cycle.
+    This is the only path that writes the full 25-slot schedule - the
+    light entity itself only retargets intensity (on/off/brightness), so
+    color recipe edits reach the device exclusively through this button.
     """
 
     _attr_has_entity_name = True
@@ -44,7 +44,11 @@ class MobiusXR15ApplyScheduleButton(ButtonEntity):
         slots = build_flat_schedule(store["channel_numbers"])
 
         light = store.get("light")
-        if light is not None and light.brightness is not None:
+        if light is not None and not light.is_on:
+            # Install the recipe without relighting the tank - the write
+            # sequence always carries an intensity value, so honor "off".
+            intensity = 0
+        elif light is not None and light.brightness is not None:
             intensity = brightness_to_intensity(light.brightness)
         else:
             intensity = 500
