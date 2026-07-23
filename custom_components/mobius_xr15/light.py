@@ -13,8 +13,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .client import MobiusXR15Client
 from .const import DOMAIN
-from .protocol import build_blank_schedule
-from .schedule import brightness_to_intensity, build_flat_schedule, intensity_to_brightness
+from .schedule import brightness_to_intensity, intensity_to_brightness
 
 DEFAULT_INTENSITY = 500
 
@@ -30,7 +29,7 @@ async def async_setup_entry(
 
 
 class MobiusXR15Light(LightEntity, RestoreEntity):
-    """Controls schedule playback and overall intensity of a Mobius XR15 light.
+    """Controls schedule playback and overall intensity via the bridge.
 
     The device has no reliable state readback over this protocol, so state
     is optimistic: it reflects the last command sent, restored across
@@ -66,23 +65,33 @@ class MobiusXR15Light(LightEntity, RestoreEntity):
             if (brightness := last_state.attributes.get(ATTR_BRIGHTNESS)) is not None:
                 self._attr_brightness = brightness
 
+    def _recipe(self) -> dict[int, int]:
+        store = self.hass.data[DOMAIN][self._entry_id]
+        return {
+            entity.channel: int(entity.native_value or 0)
+            for entity in store["channel_numbers"]
+        }
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         if ATTR_BRIGHTNESS in kwargs:
             self._attr_brightness = kwargs[ATTR_BRIGHTNESS]
 
         intensity = brightness_to_intensity(self._attr_brightness)
+        if intensity == 0:
+            intensity = DEFAULT_INTENSITY
+            self._attr_brightness = intensity_to_brightness(intensity)
+
         if self._attr_is_on:
-            # Schedule is already playing - just retarget the intensity.
+            # Schedule already playing - just retarget intensity.
             await self._client.async_set_intensity(intensity)
         else:
-            store = self.hass.data[DOMAIN][self._entry_id]
-            slots = build_flat_schedule(store["channel_numbers"])
-            await self._client.async_write_schedule(slots, intensity)
+            # Install the current color recipe and start playback.
+            await self._client.async_apply(self._recipe(), intensity)
 
         self._attr_is_on = True
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._client.async_write_schedule(build_blank_schedule(), DEFAULT_INTENSITY)
+        await self._client.async_turn_off()
         self._attr_is_on = False
         self.async_write_ha_state()

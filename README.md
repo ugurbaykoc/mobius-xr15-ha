@@ -147,7 +147,9 @@ tap_action:
 
 ### 7. (Recommended) HA Custom Component
 
-For a native integration without `rest_command` or a separate bridge process, copy `custom_components/mobius_xr15/` into your HA `config/custom_components/` directory, restart HA, then add it via **Settings → Devices & Services → Add Integration → "Mobius XR15"** and enter the light's MAC address.
+The custom component gives you real HA entities (light, color sliders, apply button) on top of the bridge. As of v2.0.0 it contains **no Bluetooth code at all**: all BLE work is done by `xr15_server.py` running directly on the host (plain `bleak` straight to BlueZ — the transport that has proven reliable), and the component talks to it over local HTTP. This deliberately keeps Home Assistant's own Bluetooth stack (and any Docker Bluetooth passthrough headaches) out of the control path entirely.
+
+Setup: run `xr15_server.py` on the same machine as HA (steps 3–5 above — for HA in Docker with `network_mode: host`, the default bridge URL `http://127.0.0.1:8765` works as-is), copy `custom_components/mobius_xr15/` into your HA `config/custom_components/` directory, restart HA, then add it via **Settings → Devices & Services → Add Integration → "Mobius XR15"** and enter the light's MAC address (used as the device identity) and the bridge URL.
 
 This adds a real `light.radion_xr15w_g5_pro` entity, plus a set of color-recipe entities:
 - **On** installs the current color recipe (see below) across the device's original 11 time points and resumes playback — the day/night dimming shape from the original reverse-engineered schedule is preserved, but every point now carries the same flat color mix rather than a distinct ramp.

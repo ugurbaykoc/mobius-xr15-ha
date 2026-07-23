@@ -1,12 +1,12 @@
-"""The Mobius XR15 integration."""
+"""The Mobius XR15 integration (HTTP bridge architecture)."""
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_MAC, Platform
+from homeassistant.const import CONF_URL, Platform
 from homeassistant.core import HomeAssistant
 
 from .client import MobiusXR15Client
-from .const import DOMAIN
+from .const import DEFAULT_URL, DOMAIN
 
 PLATFORMS: list[Platform] = [
     Platform.LIGHT,
@@ -17,7 +17,10 @@ PLATFORMS: list[Platform] = [
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Mobius XR15 from a config entry."""
-    client = MobiusXR15Client(hass, entry.data[CONF_MAC])
+    # Entries created by older (direct-BLE) versions have no URL stored;
+    # default to the bridge on localhost so they keep working unchanged.
+    url = entry.data.get(CONF_URL, DEFAULT_URL)
+    client = MobiusXR15Client(hass, url)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {"client": client}
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True

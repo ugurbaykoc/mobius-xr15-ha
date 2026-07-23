@@ -1,63 +1,63 @@
-"""BLE transport for the Mobius XR15 integration."""
+"""HTTP client for the XR15 BLE bridge (xr15_server.py on the host).
+
+There is deliberately no Bluetooth code in this integration anymore.
+All BLE work is done by the standalone bridge script running directly
+on the host (outside Docker, plain bleak straight to BlueZ) - the one
+transport that has reliably controlled this light. Home Assistant only
+makes local HTTP calls to it, which either succeed instantly or fail
+loudly with a clear error.
+"""
 from __future__ import annotations
 
 import asyncio
-import logging
 
-from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
+import aiohttp
 
-from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import RX_DATA_UUID, RX_FINAL_UUID, TX_FINAL_UUID
-from .protocol import build_intensity_sequence, build_write_sequence
-
-_LOGGER = logging.getLogger(__name__)
-
-WRITE_DELAY = 0.3
+# The bridge answers immediately (BLE work happens in its background
+# task), so anything slower than this means the bridge is down.
+REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=10)
 
 
 class MobiusXR15Client:
-    """Serializes BLE writes to a single Mobius XR15 device."""
+    """Thin async HTTP wrapper around the bridge's endpoints."""
 
-    def __init__(self, hass: HomeAssistant, address: str) -> None:
-        self._hass = hass
-        self._address = address
-        self._lock = asyncio.Lock()
+    def __init__(self, hass: HomeAssistant, base_url: str) -> None:
+        self._session = async_get_clientsession(hass)
+        self._base_url = base_url.rstrip("/")
 
-    async def async_write_schedule(self, slots: list[bytes], intensity: int) -> None:
-        """Install a 25-slot schedule and resume playback."""
-        await self._send(build_write_sequence(slots, intensity))
+    async def _request(self, method: str, path: str, json: dict | None = None) -> None:
+        url = f"{self._base_url}{path}"
+        try:
+            async with self._session.request(
+                method, url, json=json, timeout=REQUEST_TIMEOUT
+            ) as resp:
+                if resp.status != 200:
+                    body = await resp.text()
+                    raise HomeAssistantError(
+                        f"XR15 bridge returned {resp.status} for {path}: {body[:200]}"
+                    )
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            raise HomeAssistantError(
+                f"XR15 bridge unreachable at {url} - is xr15_server.py running "
+                f"on the host? ({err})"
+            ) from err
+
+    async def async_apply(self, channels: dict[int, int], intensity: int) -> None:
+        """Install the flat color recipe with the given overall intensity."""
+        await self._request(
+            "POST",
+            "/apply",
+            json={"channels": {str(k): v for k, v in channels.items()}, "intensity": intensity},
+        )
 
     async def async_set_intensity(self, intensity: int) -> None:
         """Retarget overall intensity without rewriting the schedule."""
-        await self._send(build_intensity_sequence(intensity))
+        await self._request("GET", f"/intensity/{intensity}")
 
-    async def _connect(self) -> BleakClientWithServiceCache:
-        ble_device = bluetooth.async_ble_device_from_address(
-            self._hass, self._address, connectable=True
-        )
-        if ble_device is None:
-            raise RuntimeError(
-                f"{self._address} is not visible to Home Assistant's bluetooth integration"
-            )
-        return await establish_connection(BleakClientWithServiceCache, ble_device, self._address)
-
-    async def _send(self, packets: list[bytes]) -> None:
-        async with self._lock:
-            client = await self._connect()
-            try:
-                def _noop(_char, _data) -> None:
-                    return None
-
-                try:
-                    await client.start_notify(RX_DATA_UUID, _noop)
-                    await client.start_notify(RX_FINAL_UUID, _noop)
-                except Exception as err:  # notifications aren't required for control
-                    _LOGGER.debug("Could not start notify: %s", err)
-
-                for packet in packets:
-                    await client.write_gatt_char(TX_FINAL_UUID, packet, response=False)
-                    await asyncio.sleep(WRITE_DELAY)
-            finally:
-                await client.disconnect()
+    async def async_turn_off(self) -> None:
+        """Blank the schedule - the bridge's original, proven off path."""
+        await self._request("GET", "/off")

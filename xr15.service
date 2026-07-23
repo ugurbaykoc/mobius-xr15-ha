@@ -7,7 +7,7 @@ Wants=bluetooth.target
 Type=simple
 User=ugurbaykoc
 WorkingDirectory=/home/ugurbaykoc
-ExecStart=/usr/bin/python3 /home/ugurbaykoc/test.py
+ExecStart=/home/ugurbaykoc/xr15-venv/bin/python3 /home/ugurbaykoc/xr15_server.py
 Restart=on-failure
 RestartSec=10
 

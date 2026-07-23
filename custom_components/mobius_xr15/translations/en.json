@@ -3,10 +3,11 @@
     "step": {
       "user": {
         "title": "Add Mobius XR15",
-        "description": "Enter the BLE MAC address of your EcoTech Marine Radion XR15w G5 Pro. Find it with `bluetoothctl scan on`.",
+        "description": "Enter the BLE MAC address of your Radion XR15w G5 Pro (device identity) and the URL of the XR15 bridge (xr15_server.py) that talks to it over Bluetooth.",
         "data": {
           "mac": "MAC address",
-          "name": "Name"
+          "name": "Name",
+          "url": "Bridge URL"
         }
       }
     },

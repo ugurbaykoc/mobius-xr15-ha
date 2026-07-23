@@ -195,6 +195,43 @@ async def turn_on():
     await write_schedule(build_original_schedule(), intensity=500, label="IŞIĞI AÇ")
     print("  → Işık açıldı!")
 
+def build_flat_schedule(ch_vals):
+    """Aynı renk karışımını orijinal 11 zaman noktasının hepsine yazar."""
+    times = [0, 360, 480, 600, 720, 840, 960, 1080, 1200, 1320, 1410]
+    slots = [make_item_42(t, 0x01, ch_vals) for t in times]
+    slots += [bytes(42)] * (25 - len(slots))
+    return slots
+
+async def apply_recipe(ch_vals, intensity):
+    await write_schedule(build_flat_schedule(ch_vals), intensity=intensity,
+                         label=f"RENK TARİFİ UYGULA (intensity={intensity})")
+    print("  → Tarif uygulandı!")
+
+async def write_intensity(intensity, label=""):
+    """Sadece intensity + resume yaz — schedule'a dokunmadan (2 paket)."""
+    print(f"\n{'='*50}\n{label}\n{'='*50}")
+    client = await _safe_connect(timeout=30)
+    try:
+        def noop(s, d): pass
+        try:
+            await client.start_notify(RX_DATA,  noop)
+            await client.start_notify(RX_FINAL, noop)
+        except Exception as e:
+            print(f"  notify warning: {e}")
+        tx = client.services.get_characteristic(TX_FINAL)
+        async def send(p):
+            await client._backend.write_gatt_char(tx, bytearray(p), False)
+        await send(mk_simple_set(ATTR_SCHEDULE1_INTENSITY, struct.pack("<H", intensity), 1))
+        await asyncio.sleep(0.3)
+        await send(mk_playback(SCHED_RESUME, 2))
+        await asyncio.sleep(1.0)
+        print("  ✓ Tamamlandı!")
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
 # ── HTTP server ───────────────────────────────────────────────────
 _state = "unknown"
 _ble_lock = asyncio.Lock()
@@ -221,6 +258,31 @@ async def handle_off(request):
 async def handle_status(request):
     return web.json_response({"state": _state})
 
+async def handle_apply(request):
+    """POST /apply — JSON: {"channels": {"21": 800, ...}, "intensity": 1000}"""
+    global _state
+    try:
+        data = await request.json()
+        ch_vals = {int(k): int(v) for k, v in data.get("channels", {}).items()}
+        intensity = int(data.get("intensity", 500))
+    except (ValueError, TypeError):
+        return web.json_response({"error": "bad request"}, status=400)
+    _state = "on" if intensity > 0 else "off"
+    asyncio.create_task(_run_ble(apply_recipe(ch_vals, intensity)))
+    return web.json_response({"state": _state, "channels": ch_vals, "intensity": intensity})
+
+async def handle_intensity(request):
+    """GET /intensity/{value} — schedule'a dokunmadan parlaklık (0 = karanlık)."""
+    global _state
+    try:
+        value = int(request.match_info["value"])
+    except ValueError:
+        return web.json_response({"error": "bad value"}, status=400)
+    value = max(0, min(1000, value))
+    _state = "on" if value > 0 else "off"
+    asyncio.create_task(_run_ble(write_intensity(value, label=f"INTENSITY → {value}")))
+    return web.json_response({"state": _state, "intensity": value})
+
 async def main():
     if len(sys.argv) > 1:
         cmd = sys.argv[1].lower()
@@ -235,6 +297,8 @@ async def main():
         app.router.add_get("/on",     handle_on)
         app.router.add_get("/off",    handle_off)
         app.router.add_get("/status", handle_status)
+        app.router.add_post("/apply", handle_apply)
+        app.router.add_get("/intensity/{value}", handle_intensity)
         print("XR15 server başlıyor: http://0.0.0.0:8765")
         runner = web.AppRunner(app)
         await runner.setup()

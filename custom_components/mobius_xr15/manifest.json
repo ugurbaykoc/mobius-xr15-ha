@@ -1,12 +1,14 @@
 {
   "domain": "mobius_xr15",
   "name": "Mobius XR15 (EcoTech Marine Radion)",
-  "codeowners": ["@ugurbaykoc"],
+  "codeowners": [
+    "@ugurbaykoc"
+  ],
   "config_flow": true,
-  "dependencies": ["bluetooth"],
+  "dependencies": [],
   "documentation": "https://github.com/ugurbaykoc/mobius-xr15-ha",
-  "iot_class": "local_push",
+  "iot_class": "assumed_state",
   "issue_tracker": "https://github.com/ugurbaykoc/mobius-xr15-ha/issues",
-  "requirements": ["bleak-retry-connector>=3.4.0"],
-  "version": "1.1.0"
+  "requirements": [],
+  "version": "2.0.0"
 }

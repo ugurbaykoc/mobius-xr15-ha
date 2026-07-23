@@ -9,7 +9,7 @@ from homeassistant.helpers.device_registry import DeviceInfo, format_mac
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .schedule import build_flat_schedule, brightness_to_intensity
+from .schedule import brightness_to_intensity
 
 
 async def async_setup_entry(
@@ -41,9 +41,15 @@ class MobiusXR15ApplyScheduleButton(ButtonEntity):
 
     async def async_press(self) -> None:
         store = self._hass.data[DOMAIN][self._entry_id]
-        slots = build_flat_schedule(store["channel_numbers"])
+        channels = {
+            entity.channel: int(entity.native_value or 0)
+            for entity in store["channel_numbers"]
+        }
 
         light = store.get("light")
-        intensity = brightness_to_intensity(light.brightness) if light and light.brightness else 500
+        if light is not None and light.brightness is not None:
+            intensity = brightness_to_intensity(light.brightness)
+        else:
+            intensity = 500
 
-        await store["client"].async_write_schedule(slots, intensity)
+        await store["client"].async_apply(channels, intensity)
