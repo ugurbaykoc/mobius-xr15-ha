@@ -24,6 +24,11 @@ _LOGGER = logging.getLogger(__name__)
 WRITE_DELAY = 0.3
 SERVICE_RESOLUTION_DELAY = 2.0
 CONNECT_ATTEMPTS = 6
+# Hard cap per attempt (connect + service resolution + all writes).
+# establish_connection's own internal retries can otherwise stall a
+# single attempt for minutes on a marginal link, leaving the whole
+# command apparently hung with no feedback anywhere.
+ATTEMPT_TIMEOUT = 45.0
 
 
 class MobiusXR15Client:
@@ -54,7 +59,12 @@ class MobiusXR15Client:
         self._listeners.append(listener)
         return lambda: self._listeners.remove(listener)
 
-    def _record(self, label: str, success: bool, attempts: int, error: Exception | None) -> None:
+    def _record(
+        self, label: str, success: bool | None, attempts: int, error: Exception | None
+    ) -> None:
+        # success=None means "in flight" - recorded at the start of every
+        # attempt so the Last Command sensor shows live progress instead
+        # of sitting on the previous state while a slow retry cycle runs.
         self.last_command = {
             "action": label,
             "success": success,
@@ -149,9 +159,11 @@ class MobiusXR15Client:
             last_error: Exception = RuntimeError(f"could not reach {self._address}")
             for attempt in range(1, CONNECT_ATTEMPTS + 1):
                 client: BleakClientWithServiceCache | None = None
+                self._record(label, None, attempt, None)
                 try:
-                    client = await self._connect(force_fresh=attempt > 1)
-                    await self._write_packets(client, packets)
+                    async with asyncio.timeout(ATTEMPT_TIMEOUT):
+                        client = await self._connect(force_fresh=attempt > 1)
+                        await self._write_packets(client, packets)
                     self._record(label, True, attempt, None)
                     return
                 except Exception as err:  # noqa: BLE001 - deliberately broad, see retry loop

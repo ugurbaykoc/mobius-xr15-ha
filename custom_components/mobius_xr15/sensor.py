@@ -122,7 +122,12 @@ class MobiusXR15LastCommandSensor(SensorEntity):
             self._attr_native_value = "no commands yet"
             self._attr_extra_state_attributes = {}
             return
-        status = "OK" if cmd["success"] else "FAILED"
+        if cmd["success"] is None:
+            status = f"SENDING (attempt {cmd['attempts']}/{cmd['max_attempts']})"
+        elif cmd["success"]:
+            status = "OK"
+        else:
+            status = "FAILED"
         # HA caps a sensor state at 255 chars - keep it short and put
         # the details (including full error text) in attributes.
         self._attr_native_value = f"{status}: {cmd['action']}"[:255]
