@@ -20,7 +20,10 @@ CHANNEL_NAMES: dict[int, str] = {
     32: "Moonlight Blue",
     22: "Warm White",
     16: "Cool White",
-    1: "Brightness",
+    # Channel 1 is the schedule's own master dimmer: if it is 0, the light
+    # outputs nothing regardless of the color channels. Named to avoid
+    # colliding with the light entity's brightness in the UI.
+    1: "Master Dimmer",
 }
 
 # Channels exposed as user-editable color sliders (the 3 unidentified
