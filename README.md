@@ -9,11 +9,12 @@ This project was built by **reverse-engineering the undocumented Mobius BLE prot
 ## How it works
 
 ```
-Home Assistant ──REST──► BLE Bridge (Raspberry Pi) ──BLE──► XR15w G5 Pro
-  (any machine)            xr15_server.py               Mobius C2 protocol
+Home Assistant ──HTTP──► BLE Bridge (xr15_server.py) ──BLE──► XR15w G5 Pro
+ (custom component         runs on the Docker host,       Mobius C2 protocol
+  or rest_command)         or any Pi near the tank
 ```
 
-Since HA doesn't have direct BLE access to the light, a small HTTP server runs on a Raspberry Pi near the aquarium. HA calls it via `rest_command`.
+All Bluetooth work happens in `xr15_server.py` — a small HTTP server talking plain `bleak` → BlueZ. Home Assistant (native custom component, recommended — or plain `rest_command`) only makes local HTTP calls to it. Keeping HA's own Bluetooth stack out of the control path entirely is deliberate: it is by far the most reliable architecture of everything tried, especially with HA in Docker.
 
 **Turn off** = write an all-zero schedule to the device → schedule plays silence  
 **Turn on** = restore the original schedule → light resumes normal program
@@ -71,8 +72,11 @@ Values are 0–1000 (1000 = 100%).
 - Home Assistant (any install type)
 
 ```bash
-pip install bleak aiohttp
+python3 -m venv ~/xr15-venv
+~/xr15-venv/bin/pip install 'bleak==0.22.3' aiohttp
 ```
+
+> ⚠️ The bleak version pin matters — see Troubleshooting. bleak 3.x fails to discover the light on hardware where 0.22.3 works instantly.
 
 ---
 
@@ -163,11 +167,23 @@ For day/night timing, use the auto on/off schedule below rather than editing per
 
 > ⚠️ Editing several sliders and then hitting **Apply Schedule** issues one full 25-slot BLE write (several seconds, ~6 packets). Don't wire anything to auto-apply on every single slider tick — batch your edits, then apply once.
 
-It uses Home Assistant's own Bluetooth integration for the connection (via `bleak-retry-connector`), so:
+A **Bridge Status** diagnostic sensor on the device page shows the outcome of every BLE command (`OK: off`, `FAILED: apply (intensity 1000)` with the error text as an attribute) polled from the bridge every 30 s, and the light/button entities go *unavailable* if the bridge itself stops responding. Since HA only talks HTTP, HA needs **no Bluetooth access at all** — no Docker Bluetooth passthrough, no HA Bluetooth integration, no ESPHome proxy. Only the host running `xr15_server.py` needs a working BlueZ + adapter in range of the light.
 
-> ⚠️ HA needs Bluetooth visibility of the light — either it runs on a machine with a local BT adapter in range, or you have an [ESPHome Bluetooth proxy](https://esphome.io/components/bluetooth_proxy.html) covering the aquarium.
+#### Troubleshooting (read this before blaming the code)
 
-If HA runs in Docker, this also means the container needs `network_mode: host`, the host's D-Bus socket bind-mounted (`-v /run/dbus:/run/dbus:ro`), and `NET_ADMIN`/`NET_RAW` capabilities (`--cap-add=NET_ADMIN --cap-add=NET_RAW`) for BlueZ adapter management — plus the host's own `bluetooth.service` actually running (`sudo systemctl enable --now bluetooth`).
+Hard-won lessons, in the order they will bite you:
+
+1. **Pin bleak to 0.22.x** (`pip install 'bleak==0.22.3'`). The bridge was written against the bleak 0.2x API. bleak 3.x changed both the API and discovery behavior — on the same hardware where 0.22.3 connects in ~4 s, 3.0.2 fails every attempt with `Device ... was not found`.
+2. **Corrupted BlueZ GATT cache** is the sneakiest failure: the light connects fine but its service list comes back without the `01ff0104` TX characteristic (`TX karakteristiği bulunamadı` / "TX characteristic not found"), every time, *surviving reboots*. Fix:
+   ```bash
+   bluetoothctl remove 84:25:3F:76:67:4C     # your light's MAC
+   sudo systemctl restart bluetooth
+   sudo systemctl restart xr15
+   ```
+3. **`Device ... was not found` while `bluetoothctl` can see the light** usually means something else holds the light's single BLE connection (it stops advertising while connected) — the Mobius app on a phone is the usual culprit; close it fully. Check with `bluetoothctl info <MAC>` (`Connected:` line).
+4. **"Nothing happens" at night is often correct behavior.** `/on` installs the original *day/night ramp* schedule — at 22:00 that means moonlight at 15%, i.e. nearly dark. The flat recipe (`/apply`, or HA's Apply Schedule) shows the same mix at every hour — use it to verify the chain any time of day. And a recipe with all sliders at 0 is a faithful command to display darkness.
+5. **The bridge logs everything** — `journalctl -u xr15 -f` shows each connect attempt, packet write, and error in real time (the systemd unit runs Python unbuffered specifically so this works).
+6. **Read the device's actual state** when in doubt: `curl "http://127.0.0.1:8765/dump?attr=511&variant=3"` returns the light's stored intensity as a raw C2 response frame (attr 500 = schedule, 510 = playback). If your value reads back, the write path works and the problem is elsewhere.
 
 #### Optional: automatic daily on/off schedule
 
