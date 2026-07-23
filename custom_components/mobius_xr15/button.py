@@ -39,6 +39,11 @@ class MobiusXR15ApplyScheduleButton(ButtonEntity):
         self._attr_unique_id = f"{device_id}_apply_schedule"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device_id)})
 
+    @property
+    def available(self) -> bool:
+        """Unavailable when the bridge itself is unreachable."""
+        return self._hass.data[DOMAIN][self._entry_id]["coordinator"].last_update_success
+
     async def async_press(self) -> None:
         store = self._hass.data[DOMAIN][self._entry_id]
         channels = {

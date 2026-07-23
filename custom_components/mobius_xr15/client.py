@@ -46,6 +46,20 @@ class MobiusXR15Client:
                 f"on the host? ({err})"
             ) from err
 
+    async def async_status(self) -> dict:
+        """Fetch bridge state + outcome of the last BLE command."""
+        url = f"{self._base_url}/status"
+        try:
+            async with self._session.get(url, timeout=REQUEST_TIMEOUT) as resp:
+                if resp.status != 200:
+                    raise HomeAssistantError(f"XR15 bridge returned {resp.status} for /status")
+                return await resp.json()
+        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+            raise HomeAssistantError(
+                f"XR15 bridge unreachable at {url} - is xr15_server.py running "
+                f"on the host? ({err})"
+            ) from err
+
     async def async_apply(self, channels: dict[int, int], intensity: int) -> None:
         """Install the flat color recipe with the given overall intensity."""
         await self._request(

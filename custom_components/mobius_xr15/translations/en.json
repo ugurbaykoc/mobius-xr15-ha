@@ -12,7 +12,8 @@
       }
     },
     "error": {
-      "invalid_mac": "Enter a MAC address in the form AA:BB:CC:DD:EE:FF."
+      "invalid_mac": "Enter a MAC address in the form AA:BB:CC:DD:EE:FF.",
+      "cannot_connect": "Could not reach the XR15 bridge at this URL. Check that xr15_server.py is running on the host."
     },
     "abort": {
       "already_configured": "This device is already configured."

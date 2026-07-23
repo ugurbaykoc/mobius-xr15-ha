@@ -8,8 +8,10 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.const import CONF_MAC, CONF_NAME, CONF_URL
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import format_mac
 
+from .client import MobiusXR15Client
 from .const import DEFAULT_NAME, DEFAULT_URL, DOMAIN
 
 MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
@@ -38,6 +40,13 @@ class MobiusXR15ConfigFlow(ConfigFlow, domain=DOMAIN):
             if not MAC_RE.match(mac):
                 errors[CONF_MAC] = "invalid_mac"
             else:
+                try:
+                    await MobiusXR15Client(
+                        self.hass, user_input[CONF_URL].strip()
+                    ).async_status()
+                except HomeAssistantError:
+                    errors[CONF_URL] = "cannot_connect"
+            if not errors:
                 await self.async_set_unique_id(format_mac(mac))
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(

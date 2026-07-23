@@ -1,18 +1,28 @@
 """The Mobius XR15 integration (HTTP bridge architecture)."""
 from __future__ import annotations
 
+import logging
+from datetime import timedelta
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_URL, Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .client import MobiusXR15Client
 from .const import DEFAULT_URL, DOMAIN
+
+_LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [
     Platform.LIGHT,
     Platform.NUMBER,
     Platform.BUTTON,
+    Platform.SENSOR,
 ]
+
+STATUS_INTERVAL = timedelta(seconds=30)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -21,7 +31,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # default to the bridge on localhost so they keep working unchanged.
     url = entry.data.get(CONF_URL, DEFAULT_URL)
     client = MobiusXR15Client(hass, url)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {"client": client}
+
+    async def _async_update() -> dict:
+        try:
+            return await client.async_status()
+        except HomeAssistantError as err:
+            raise UpdateFailed(str(err)) from err
+
+    coordinator: DataUpdateCoordinator[dict] = DataUpdateCoordinator(
+        hass,
+        _LOGGER,
+        name=f"{DOMAIN} bridge",
+        update_method=_async_update,
+        update_interval=STATUS_INTERVAL,
+    )
+    # Fails setup cleanly (with automatic retries) if the bridge is down.
+    await coordinator.async_config_entry_first_refresh()
+
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "client": client,
+        "coordinator": coordinator,
+    }
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 

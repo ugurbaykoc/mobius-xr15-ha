@@ -64,6 +64,14 @@ class MobiusXR15Light(LightEntity, RestoreEntity):
             self._attr_is_on = last_state.state == "on"
             if (brightness := last_state.attributes.get(ATTR_BRIGHTNESS)) is not None:
                 self._attr_brightness = brightness
+        # Re-render (and update availability) whenever the bridge poll runs.
+        coordinator = self.hass.data[DOMAIN][self._entry_id]["coordinator"]
+        self.async_on_remove(coordinator.async_add_listener(self.async_write_ha_state))
+
+    @property
+    def available(self) -> bool:
+        """Unavailable when the bridge itself is unreachable."""
+        return self.hass.data[DOMAIN][self._entry_id]["coordinator"].last_update_success
 
     def _recipe(self) -> dict[int, int]:
         store = self.hass.data[DOMAIN][self._entry_id]

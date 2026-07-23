@@ -8,6 +8,7 @@ Kullanım:
 import asyncio
 import struct
 import sys
+from datetime import datetime
 from bleak import BleakClient
 from aiohttp import web
 
@@ -236,29 +237,37 @@ async def write_intensity(intensity, label=""):
 
 # ── HTTP server ───────────────────────────────────────────────────
 _state = "unknown"
+_last_result = {"ok": None, "label": None, "error": None, "at": None}
 _ble_lock = asyncio.Lock()
 
-async def _run_ble(coro):
+async def _run_ble(coro, label=""):
+    global _last_result
     async with _ble_lock:
+        _last_result = {"ok": None, "label": label, "error": None,
+                        "at": datetime.now().isoformat(timespec="seconds")}
         try:
             await coro
+            _last_result = {"ok": True, "label": label, "error": None,
+                            "at": datetime.now().isoformat(timespec="seconds")}
         except Exception as e:
             print(f"BLE hata: {e}")
+            _last_result = {"ok": False, "label": label, "error": str(e),
+                            "at": datetime.now().isoformat(timespec="seconds")}
 
 async def handle_on(request):
     global _state
     _state = "on"
-    asyncio.create_task(_run_ble(turn_on()))
+    asyncio.create_task(_run_ble(turn_on(), "on"))
     return web.json_response({"state": "on"})
 
 async def handle_off(request):
     global _state
     _state = "off"
-    asyncio.create_task(_run_ble(turn_off()))
+    asyncio.create_task(_run_ble(turn_off(), "off"))
     return web.json_response({"state": "off"})
 
 async def handle_status(request):
-    return web.json_response({"state": _state})
+    return web.json_response({"state": _state, "last_result": _last_result})
 
 async def handle_apply(request):
     """POST /apply — JSON: {"channels": {"21": 800, ...}, "intensity": 1000}"""
@@ -270,7 +279,7 @@ async def handle_apply(request):
     except (ValueError, TypeError):
         return web.json_response({"error": "bad request"}, status=400)
     _state = "on" if intensity > 0 else "off"
-    asyncio.create_task(_run_ble(apply_recipe(ch_vals, intensity)))
+    asyncio.create_task(_run_ble(apply_recipe(ch_vals, intensity), f"apply (intensity {intensity})"))
     return web.json_response({"state": _state, "channels": ch_vals, "intensity": intensity})
 
 async def handle_intensity(request):
@@ -282,7 +291,8 @@ async def handle_intensity(request):
         return web.json_response({"error": "bad value"}, status=400)
     value = max(0, min(1000, value))
     _state = "on" if value > 0 else "off"
-    asyncio.create_task(_run_ble(write_intensity(value, label=f"INTENSITY → {value}")))
+    asyncio.create_task(_run_ble(write_intensity(value, label=f"INTENSITY → {value}"),
+                                 f"intensity {value}"))
     return web.json_response({"state": _state, "intensity": value})
 
 async def main():
