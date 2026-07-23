@@ -8,5 +8,5 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/ugurbaykoc/mobius-xr15-ha/issues",
   "requirements": ["bleak-retry-connector>=3.4.0"],
-  "version": "1.4.0"
+  "version": "1.5.0"
 }

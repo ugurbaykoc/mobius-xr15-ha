@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
+from datetime import datetime, timezone
+from typing import Any
 
 from bleak_retry_connector import (
     BleakClientWithServiceCache,
@@ -39,14 +42,40 @@ class MobiusXR15Client:
         self._hass = hass
         self._address = address
         self._lock = asyncio.Lock()
+        # Outcome of the most recent command, surfaced by the "Last
+        # Command" diagnostic sensor so failures are visible in the UI
+        # instead of only in debug logs.
+        self.last_command: dict[str, Any] | None = None
+        self._used_ack_writes: bool | None = None
+        self._listeners: list[Callable[[], None]] = []
+
+    def register_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
+        """Subscribe to last_command updates; returns an unsubscribe callable."""
+        self._listeners.append(listener)
+        return lambda: self._listeners.remove(listener)
+
+    def _record(self, label: str, success: bool, attempts: int, error: Exception | None) -> None:
+        self.last_command = {
+            "action": label,
+            "success": success,
+            "attempts": attempts,
+            "max_attempts": CONNECT_ATTEMPTS,
+            "acknowledged_writes": self._used_ack_writes,
+            "error": str(error) if error is not None else None,
+            "when": datetime.now(timezone.utc),
+        }
+        for listener in list(self._listeners):
+            listener()
 
     async def async_write_schedule(self, slots: list[bytes], intensity: int) -> None:
         """Install a 25-slot schedule and resume playback."""
-        await self._send(build_write_sequence(slots, intensity))
+        await self._send(
+            build_write_sequence(slots, intensity), f"write schedule + intensity {intensity}"
+        )
 
     async def async_set_intensity(self, intensity: int) -> None:
         """Retarget overall intensity without rewriting the schedule."""
-        await self._send(build_intensity_sequence(intensity))
+        await self._send(build_intensity_sequence(intensity), f"set intensity {intensity}")
 
     def _on_disconnected(self, _client: BleakClientWithServiceCache) -> None:
         _LOGGER.debug("%s: BLE disconnected", self._address)
@@ -103,6 +132,7 @@ class MobiusXR15Client:
         # write-without-response can silently drop a packet with no error
         # at all, since there's nothing to confirm delivery.
         use_response = "write" in tx_char.properties
+        self._used_ack_writes = use_response
         _LOGGER.debug(
             "%s: TX characteristic properties=%s, write-with-response=%s",
             self._address,
@@ -114,7 +144,7 @@ class MobiusXR15Client:
             await client.write_gatt_char(TX_FINAL_UUID, packet, response=use_response)
             await asyncio.sleep(WRITE_DELAY)
 
-    async def _send(self, packets: list[bytes]) -> None:
+    async def _send(self, packets: list[bytes], label: str) -> None:
         async with self._lock:
             last_error: Exception = RuntimeError(f"could not reach {self._address}")
             for attempt in range(1, CONNECT_ATTEMPTS + 1):
@@ -122,6 +152,7 @@ class MobiusXR15Client:
                 try:
                     client = await self._connect(force_fresh=attempt > 1)
                     await self._write_packets(client, packets)
+                    self._record(label, True, attempt, None)
                     return
                 except Exception as err:  # noqa: BLE001 - deliberately broad, see retry loop
                     last_error = err
@@ -148,4 +179,5 @@ class MobiusXR15Client:
                                 disconnect_err,
                             )
 
+            self._record(label, False, CONNECT_ATTEMPTS, last_error)
             raise last_error

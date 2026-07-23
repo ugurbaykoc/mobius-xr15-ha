@@ -24,9 +24,15 @@ UPDATE_INTERVAL = timedelta(seconds=30)
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up the signal strength sensor."""
+    """Set up the diagnostic sensors."""
     mac = entry.data[CONF_MAC]
-    async_add_entities([MobiusXR15SignalSensor(hass, mac)])
+    store = hass.data[DOMAIN][entry.entry_id]
+    async_add_entities(
+        [
+            MobiusXR15SignalSensor(hass, mac),
+            MobiusXR15LastCommandSensor(store["client"], mac),
+        ]
+    )
 
 
 class MobiusXR15SignalSensor(SensorEntity):
@@ -69,3 +75,61 @@ class MobiusXR15SignalSensor(SensorEntity):
         info = async_last_service_info(self._hass, self._address, connectable=True)
         self._attr_native_value = info.rssi if info is not None else None
         self.async_write_ha_state()
+
+
+class MobiusXR15LastCommandSensor(SensorEntity):
+    """Outcome of the most recent BLE command, visible right in the UI.
+
+    Answers "did that toggle actually reach the light?" without needing
+    docker logs: the state is e.g. "OK: set intensity 0" or
+    "FAILED: set intensity 0", with attempt count, whether acknowledged
+    GATT writes were used, the full error text, and a timestamp as
+    attributes.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Last Command"
+    _attr_icon = "mdi:bluetooth-transfer"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_should_poll = False
+
+    def __init__(self, client, mac: str) -> None:
+        self._client = client
+        device_id = format_mac(mac)
+        self._attr_unique_id = f"{device_id}_last_command"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device_id)})
+        self._unsub: callable | None = None
+        self._refresh()
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self._unsub = self._client.register_listener(self._handle_update)
+        self._refresh()
+
+    async def async_will_remove_from_hass(self) -> None:
+        if self._unsub is not None:
+            self._unsub()
+            self._unsub = None
+
+    @callback
+    def _handle_update(self) -> None:
+        self._refresh()
+        self.async_write_ha_state()
+
+    def _refresh(self) -> None:
+        cmd = self._client.last_command
+        if cmd is None:
+            self._attr_native_value = "no commands yet"
+            self._attr_extra_state_attributes = {}
+            return
+        status = "OK" if cmd["success"] else "FAILED"
+        # HA caps a sensor state at 255 chars - keep it short and put
+        # the details (including full error text) in attributes.
+        self._attr_native_value = f"{status}: {cmd['action']}"[:255]
+        self._attr_extra_state_attributes = {
+            "attempts_used": cmd["attempts"],
+            "max_attempts": cmd["max_attempts"],
+            "acknowledged_writes": cmd["acknowledged_writes"],
+            "error": cmd["error"],
+            "at": cmd["when"].isoformat(),
+        }
