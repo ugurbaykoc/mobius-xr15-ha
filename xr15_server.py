@@ -138,6 +138,8 @@ async def _safe_connect(timeout=30, retries=3):
             # Servisler hazır mı kontrol et
             tx = client.services.get_characteristic(TX_FINAL)
             if tx is None:
+                found = [s.uuid for s in client.services]
+                print(f"  Bulunan servisler: {found or 'HİÇBİRİ (boş GATT listesi)'}")
                 raise RuntimeError("TX karakteristiği bulunamadı")
             print(f"  Bağlandı (deneme {attempt})")
             return client
