@@ -4,7 +4,11 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
+from bleak_retry_connector import (
+    BleakClientWithServiceCache,
+    close_stale_connections_by_address,
+    establish_connection,
+)
 
 from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
@@ -55,6 +59,15 @@ class MobiusXR15Client:
             raise RuntimeError(
                 f"{self._address} is not visible to Home Assistant's bluetooth integration"
             )
+        # If a previous attempt connected at the BlueZ level but raised
+        # before handing us back a usable client (e.g. an error during
+        # establish_connection's own internal retry/service-resolution
+        # logic), that connection has no Python-side reference anywhere
+        # and would otherwise sit there indefinitely, occupying one of
+        # the adapter's limited connection slots and potentially leaving
+        # every subsequent attempt fighting a zombie connection instead
+        # of a fresh one. Force-clear anything like that first.
+        await close_stale_connections_by_address(self._address)
         client = await establish_connection(
             BleakClientWithServiceCache,
             ble_device,
