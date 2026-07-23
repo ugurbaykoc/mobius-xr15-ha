@@ -81,6 +81,12 @@ def mk_simple_set(attr_id, value, msg_id):
     body = bytes([0xDE, 24]) + struct.pack("<H", msg_id) + b"\x00\x00" + struct.pack("<H", len(d)) + d
     return b"\x02" + body + struct.pack("<H", crc16(body))
 
+def mk_get(attr_id, msg_id, extra=b""):
+    """GET (opcode 0x17) — cihazdan attribute değerini oku."""
+    d = struct.pack("<H", attr_id) + extra
+    body = bytes([0xDE, 0x17]) + struct.pack("<H", msg_id) + b"\x00\x00" + struct.pack("<H", len(d)) + d
+    return b"\x02" + body + struct.pack("<H", crc16(body))
+
 def mk_playback(action, msg_id):
     d = struct.pack("<H", ATTR_SCHEDULE_PLAYBACK) + bytes([0, 1, len(action)]) + action
     body = bytes([0xDE, 0x18]) + struct.pack("<H", msg_id) + b"\x00\x00" + struct.pack("<H", len(d)) + d
@@ -269,6 +275,47 @@ async def handle_off(request):
 async def handle_status(request):
     return web.json_response({"state": _state, "last_result": _last_result})
 
+async def read_attr(attr_id, extra=b"", wait=6.0):
+    """GET gönder, cihazın notification cevaplarını topla, ham bytes döndür."""
+    client = await _safe_connect(timeout=30)
+    received = []
+    try:
+        def on_note(_char, data):
+            received.append(bytes(data))
+        await client.start_notify(RX_DATA, on_note)
+        await client.start_notify(RX_FINAL, on_note)
+        tx = client.services.get_characteristic(TX_FINAL)
+        pkt = mk_get(attr_id, 1, extra)
+        print(f"  GET attr={attr_id} gönderiliyor: {pkt.hex()}")
+        await client._backend.write_gatt_char(tx, bytearray(pkt), False)
+        await asyncio.sleep(wait)
+    finally:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+    return received
+
+async def handle_dump(request):
+    """GET /dump?attr=511 — cihazdan oku ve ham cevabı JSON olarak döndür."""
+    try:
+        attr = int(request.query.get("attr", "500"))
+        variant = int(request.query.get("variant", "0"))
+    except ValueError:
+        return web.json_response({"error": "bad params"}, status=400)
+    extra = [b"", b"\x00", b"\x00\x00"][variant % 3]
+    async with _ble_lock:
+        try:
+            packets = await read_attr(attr, extra)
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+    dump = [p.hex() for p in packets]
+    for i, h in enumerate(dump):
+        print(f"  RX[{i}] ({len(h)//2}B): {h}")
+    return web.json_response(
+        {"attr": attr, "variant": variant, "count": len(dump), "packets": dump}
+    )
+
 async def handle_apply(request):
     """POST /apply — JSON: {"channels": {"21": 800, ...}, "intensity": 1000}"""
     global _state
@@ -311,6 +358,7 @@ async def main():
         app.router.add_get("/status", handle_status)
         app.router.add_post("/apply", handle_apply)
         app.router.add_get("/intensity/{value}", handle_intensity)
+        app.router.add_get("/dump", handle_dump)
         print("XR15 server başlıyor: http://0.0.0.0:8765")
         runner = web.AppRunner(app)
         await runner.setup()
