@@ -275,18 +275,20 @@ async def handle_off(request):
 async def handle_status(request):
     return web.json_response({"state": _state, "last_result": _last_result})
 
-async def read_attr(attr_id, extra=b"", wait=6.0):
+async def read_attr(attr_id, extra=b"", wait=8.0):
     """GET gönder, cihazın notification cevaplarını topla, ham bytes döndür."""
     client = await _safe_connect(timeout=30)
     received = []
     try:
-        def on_note(_char, data):
-            received.append(bytes(data))
+        def on_note(char, data):
+            uuid = getattr(char, "uuid", str(char))
+            tag = "DATA" if str(uuid).startswith("01ff0101") else "FINAL"
+            received.append((tag, bytes(data)))
         await client.start_notify(RX_DATA, on_note)
         await client.start_notify(RX_FINAL, on_note)
         tx = client.services.get_characteristic(TX_FINAL)
         pkt = mk_get(attr_id, 1, extra)
-        print(f"  GET attr={attr_id} gönderiliyor: {pkt.hex()}")
+        print(f"  GET attr={attr_id} extra={extra.hex() or '-'} gönderiliyor: {pkt.hex()}")
         await client._backend.write_gatt_char(tx, bytearray(pkt), False)
         await asyncio.sleep(wait)
     finally:
@@ -303,15 +305,19 @@ async def handle_dump(request):
         variant = int(request.query.get("variant", "0"))
     except ValueError:
         return web.json_response({"error": "bad params"}, status=400)
-    extra = [b"", b"\x00", b"\x00\x00"][variant % 3]
+    # v0: attr only            v3: sub=0, count=1 (SET'in alan düzeni)
+    # v1: attr + 0x00          v4: sub=0, count=25 (tüm slotlar?)
+    # v2: attr + 0x0000        v5: sub=0, count=1, len=0
+    variants = [b"", b"\x00", b"\x00\x00", b"\x00\x01", b"\x00\x19", b"\x00\x01\x00"]
+    extra = variants[variant % len(variants)]
     async with _ble_lock:
         try:
             packets = await read_attr(attr, extra)
         except Exception as e:
             return web.json_response({"error": str(e)}, status=500)
-    dump = [p.hex() for p in packets]
+    dump = [f"{tag}:{p.hex()}" for tag, p in packets]
     for i, h in enumerate(dump):
-        print(f"  RX[{i}] ({len(h)//2}B): {h}")
+        print(f"  RX[{i}]: {h}")
     return web.json_response(
         {"attr": attr, "variant": variant, "count": len(dump), "packets": dump}
     )
