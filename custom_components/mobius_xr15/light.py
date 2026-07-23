@@ -13,7 +13,8 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .client import MobiusXR15Client
 from .const import DOMAIN
-from .schedule import brightness_to_intensity, intensity_to_brightness
+from .protocol import build_blank_schedule
+from .schedule import brightness_to_intensity, build_flat_schedule, intensity_to_brightness
 
 DEFAULT_INTENSITY = 500
 
@@ -45,6 +46,7 @@ class MobiusXR15Light(LightEntity, RestoreEntity):
 
     def __init__(self, client: MobiusXR15Client, entry: ConfigEntry) -> None:
         self._client = client
+        self._entry_id = entry.entry_id
         mac = entry.data[CONF_MAC]
         self._attr_unique_id = format_mac(mac)
         self._attr_device_info = DeviceInfo(
@@ -64,29 +66,23 @@ class MobiusXR15Light(LightEntity, RestoreEntity):
             if (brightness := last_state.attributes.get(ATTR_BRIGHTNESS)) is not None:
                 self._attr_brightness = brightness
 
-    # On, off, and brightness are all the same 2-packet operation: retarget
-    # the device's Schedule1Intensity multiplier (0 = dark, restore = lit)
-    # and resume playback. Intensity retargeting is the one operation
-    # confirmed to physically work on-device, and keeping every light
-    # command down to 2 packets matters on a marginal BLE link. The heavy
-    # 25-slot schedule write only happens via the Apply Schedule button.
-
     async def async_turn_on(self, **kwargs: Any) -> None:
         if ATTR_BRIGHTNESS in kwargs:
             self._attr_brightness = kwargs[ATTR_BRIGHTNESS]
 
         intensity = brightness_to_intensity(self._attr_brightness)
-        if intensity == 0:
-            # Restored/requested brightness of 0 would leave the light dark
-            # despite reporting "on" - floor it to something visible.
-            intensity = DEFAULT_INTENSITY
-            self._attr_brightness = intensity_to_brightness(intensity)
-        await self._client.async_set_intensity(intensity)
+        if self._attr_is_on:
+            # Schedule is already playing - just retarget the intensity.
+            await self._client.async_set_intensity(intensity)
+        else:
+            store = self.hass.data[DOMAIN][self._entry_id]
+            slots = build_flat_schedule(store["channel_numbers"])
+            await self._client.async_write_schedule(slots, intensity)
 
         self._attr_is_on = True
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._client.async_set_intensity(0)
+        await self._client.async_write_schedule(build_blank_schedule(), DEFAULT_INTENSITY)
         self._attr_is_on = False
         self.async_write_ha_state()

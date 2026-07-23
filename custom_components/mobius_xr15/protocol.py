@@ -14,7 +14,6 @@ from .const import (
     ATTR_SCHEDULE_PLAYBACK,
     BATCH_SIZE,
     CHANNELS_42,
-    FIXED_SCHEDULE_TIMES,
     SCHED_RESUME,
     SLOT_COUNT,
 )
@@ -132,11 +131,5 @@ def build_intensity_sequence(intensity: int) -> list[bytes]:
 
 
 def build_blank_schedule() -> list[bytes]:
-    """Well-formed slots with every channel at 0 - the schedule plays silence.
-
-    Deliberately not raw bytes(42): that encodes channel id 0 for all 13
-    entries (not a real channel - see CHANNELS_42) with flags=0x00 instead
-    of the 0x01 every real slot uses. The device appears to just ignore
-    malformed slots like that rather than actually going dark.
-    """
-    return [make_schedule_slot(time_min, 0x01, {}) for time_min in FIXED_SCHEDULE_TIMES]
+    """25 all-zero slots — the schedule plays silence (light off)."""
+    return [bytes(42)] * SLOT_COUNT

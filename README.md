@@ -150,10 +150,12 @@ tap_action:
 For a native integration without `rest_command` or a separate bridge process, copy `custom_components/mobius_xr15/` into your HA `config/custom_components/` directory, restart HA, then add it via **Settings → Devices & Services → Add Integration → "Mobius XR15"** and enter the light's MAC address.
 
 This adds a real `light.radion_xr15w_g5_pro` entity, plus a set of color-recipe entities:
-- **On / Off / Brightness** are all the same lightweight operation: retargeting the device's `Schedule1Intensity` attribute (0–1000 on the wire ↔ 0–255 in HA), an overall multiplier on whatever schedule the device is playing. **Off = intensity 0**, on = intensity restored to the last brightness. This is deliberate — it's a 2-packet write instead of the ~8-packet full schedule write, which matters enormously on a marginal BLE link, and intensity retargeting is the operation most reliably honored by the device. The onboard schedule itself is left untouched by the light switch.
+- **On** installs the current color recipe (see below) across the device's original 11 time points and resumes playback — the day/night dimming shape from the original reverse-engineered schedule is preserved, but every point now carries the same flat color mix rather than a distinct ramp.
+- **Off** writes an all-zero schedule.
+- **Brightness** maps directly to the device's `Schedule1Intensity` attribute (0–1000 on the wire ↔ 0–255 in HA) — an overall multiplier on top of the recipe. Adjusting brightness while the light is already on only retargets intensity — it doesn't rewrite the schedule.
 - State is optimistic (the device has no reliable readback over this protocol) and is restored across HA restarts.
 
-The color recipe is 10 `number.*` entities, one per channel (UV, Violet, Royal Blue, Blue, Green, Red, Moonlight Blue, Warm White, Cool White, Brightness — the 3 unidentified protocol channels are left at 0 and not exposed), plus a `button.*` entity, **Apply Schedule**, that installs the current values on the device as a flat schedule (the same color mix across the device's original 11 time points). This button is the **only** path that writes the schedule — the light entity never does — so after editing sliders, press Apply Schedule to make the change real. Pressing it while the light is off installs the recipe at intensity 0, so it won't relight the tank. All of these appear automatically under the device's page (Settings → Devices & Services → Mobius XR15 device).
+The color recipe is 10 `number.*` entities, one per channel (UV, Violet, Royal Blue, Blue, Green, Red, Moonlight Blue, Warm White, Cool White, Brightness — the 3 unidentified protocol channels are left at 0 and not exposed), plus a `button.*` entity, **Apply Schedule**, that pushes the current values to the device immediately without needing a full off/on cycle. All of these appear automatically under the device's page (Settings → Devices & Services → Mobius XR15 device). Turning the light on always re-installs the current recipe, so edits persist across HA restarts the same way the light's own state does.
 
 For day/night timing, use the auto on/off schedule below rather than editing per-time-of-day values — this integration intentionally doesn't expose per-slot editing (11 slots × 13 channels = 143 entities proved unwieldy in practice).
 
@@ -163,17 +165,7 @@ It uses Home Assistant's own Bluetooth integration for the connection (via `blea
 
 > ⚠️ HA needs Bluetooth visibility of the light — either it runs on a machine with a local BT adapter in range, or you have an [ESPHome Bluetooth proxy](https://esphome.io/components/bluetooth_proxy.html) covering the aquarium.
 
-If HA runs in Docker, this also means the container needs `network_mode: host`, the host's D-Bus socket bind-mounted (`-v /run/dbus:/run/dbus:ro`), and full `--privileged` access (granular `--cap-add=NET_ADMIN --cap-add=NET_RAW` covers basic adapter management but not BlueZ's lower-level management socket, used for connection parameter negotiation — `--privileged` is the reliable way to get all of it) — plus the host's own `bluetooth.service` actually running (`sudo systemctl enable --now bluetooth`).
-
-#### Troubleshooting a marginal BLE connection
-
-If HA and the light's Bluetooth adapter aren't close together, expect a genuinely weak link (RSSI in the -75 to -85 dBm range is usable but flaky, not comfortable). The integration is built to tolerate this rather than assume a clean connection:
-
-- **`client.py` retries the entire connect→verify→write cycle up to 6 times per command**, not just the initial connection — a write that fails partway through (a real possibility on a weak signal) gets a genuine fresh retry, not a silent failure. Each attempt includes a deliberate ~2s pause after connecting before touching any characteristics, since BlueZ resolves GATT services asynchronously and can report "connected" before that resolution has actually finished.
-- **Acknowledged writes are used automatically when the device's characteristic supports them.** Unacknowledged writes (`write-without-response`) can silently drop a packet on a weak link with zero error anywhere — nothing to catch, nothing logged, the device just never gets that packet. `client.py` checks the characteristic's advertised properties and uses an acknowledged write when possible, so a dropped packet actually raises an error the retry loop can catch instead of vanishing.
-- **A `sensor.*` entity ("Signal Strength", diagnostic category) shows the light's last-seen RSSI** directly from HA's own passive Bluetooth scanning, independent of whether a GATT connection is currently open. Check it before assuming a code problem — a run of failures that lines up with a worse RSSI reading points at the physical link, not the integration.
-- **If retries alone aren't enough**, the real fix is physical: reduce the distance/obstructions between the Bluetooth adapter and the light (move the Pi, add a USB adapter on a short extension cable nearer the tank) or add an [ESPHome Bluetooth proxy](https://esphome.io/components/bluetooth_proxy.html) close to the aquarium so HA has a strong local connection instead of reaching across a room. Software retries can only paper over a weak signal so much.
-- To see exactly what the client is doing on each attempt, enable debug logging (Developer Tools → Actions → `logger.set_level` with `custom_components.mobius_xr15.client: debug`, or the equivalent `logger:` block in `configuration.yaml`) and watch for `TX characteristic properties=...` / `attempt N/6 failed: ...` lines.
+If HA runs in Docker, this also means the container needs `network_mode: host`, the host's D-Bus socket bind-mounted (`-v /run/dbus:/run/dbus:ro`), and `NET_ADMIN`/`NET_RAW` capabilities (`--cap-add=NET_ADMIN --cap-add=NET_RAW`) for BlueZ adapter management — plus the host's own `bluetooth.service` actually running (`sudo systemctl enable --now bluetooth`).
 
 #### Optional: automatic daily on/off schedule
 
@@ -218,11 +210,10 @@ To use either:
         ├── const.py
         ├── protocol.py               # pure C2 protocol packet builders (no I/O)
         ├── schedule.py               # builds the flat schedule from the color entities
-        ├── client.py                 # BLE transport (bleak-retry-connector, retries whole op)
+        ├── client.py                 # BLE transport (bleak-retry-connector)
         ├── light.py                  # light.radion_xr15w_g5_pro entity
         ├── number.py                 # per-channel color recipe entities (10)
         ├── button.py                 # "Apply Schedule" action
-        ├── sensor.py                 # signal strength (RSSI) diagnostic entity
         └── strings.json / translations/en.json
 ```
 
