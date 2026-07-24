@@ -1,0 +1,121 @@
+# Optional: aquarium maintenance reminders (water change, filter, glass).
+# Paste each top-level block into your configuration.yaml, merging into the
+# matching section if it already exists (input_datetime: from
+# xr15_schedule_helpers.yaml, for example, must stay a single section).
+#
+# Per task this provides:
+#   input_datetime.akvaryum_*_son        - date it was last done
+#   input_number.akvaryum_*_aralik       - how often it should happen (days)
+#   sensor.*_kalan_gun                   - days remaining (negative = overdue)
+#   script.akvaryum_*_yapildi            - "done today" stamp, used by the
+#                                          dashboard button and notifications
+input_datetime:
+  akvaryum_su_degisimi_son:
+    name: "Son Su Değişimi"
+    has_date: true
+    has_time: false
+    icon: mdi:water-sync
+  akvaryum_filtre_temizligi_son:
+    name: "Son Filtre Temizliği"
+    has_date: true
+    has_time: false
+    icon: mdi:air-filter
+  akvaryum_cam_temizligi_son:
+    name: "Son Cam Temizliği"
+    has_date: true
+    has_time: false
+    icon: mdi:spray-bottle
+
+input_number:
+  akvaryum_su_degisimi_aralik:
+    name: "Su Değişimi Aralığı"
+    min: 1
+    max: 60
+    step: 1
+    unit_of_measurement: "gün"
+    icon: mdi:water-sync
+    mode: box
+  akvaryum_filtre_temizligi_aralik:
+    name: "Filtre Temizliği Aralığı"
+    min: 1
+    max: 120
+    step: 1
+    unit_of_measurement: "gün"
+    icon: mdi:air-filter
+    mode: box
+  akvaryum_cam_temizligi_aralik:
+    name: "Cam Temizliği Aralığı"
+    min: 1
+    max: 60
+    step: 1
+    unit_of_measurement: "gün"
+    icon: mdi:spray-bottle
+    mode: box
+
+template:
+  - sensor:
+      - name: "Su Değişimi Kalan Gün"
+        unique_id: akvaryum_su_degisimi_kalan_gun
+        unit_of_measurement: "gün"
+        icon: mdi:water-sync
+        state: >
+          {% set son = states('input_datetime.akvaryum_su_degisimi_son') %}
+          {% set aralik = states('input_number.akvaryum_su_degisimi_aralik') | int(7) %}
+          {% if son in ['unknown', 'unavailable', ''] %}
+            0
+          {% else %}
+            {{ aralik - (now().date() - strptime(son, '%Y-%m-%d').date()).days }}
+          {% endif %}
+      - name: "Filtre Temizliği Kalan Gün"
+        unique_id: akvaryum_filtre_temizligi_kalan_gun
+        unit_of_measurement: "gün"
+        icon: mdi:air-filter
+        state: >
+          {% set son = states('input_datetime.akvaryum_filtre_temizligi_son') %}
+          {% set aralik = states('input_number.akvaryum_filtre_temizligi_aralik') | int(30) %}
+          {% if son in ['unknown', 'unavailable', ''] %}
+            0
+          {% else %}
+            {{ aralik - (now().date() - strptime(son, '%Y-%m-%d').date()).days }}
+          {% endif %}
+      - name: "Cam Temizliği Kalan Gün"
+        unique_id: akvaryum_cam_temizligi_kalan_gun
+        unit_of_measurement: "gün"
+        icon: mdi:spray-bottle
+        state: >
+          {% set son = states('input_datetime.akvaryum_cam_temizligi_son') %}
+          {% set aralik = states('input_number.akvaryum_cam_temizligi_aralik') | int(7) %}
+          {% if son in ['unknown', 'unavailable', ''] %}
+            0
+          {% else %}
+            {{ aralik - (now().date() - strptime(son, '%Y-%m-%d').date()).days }}
+          {% endif %}
+
+script:
+  akvaryum_su_degisimi_yapildi:
+    alias: "Su Değişimi Yapıldı"
+    icon: mdi:water-sync
+    sequence:
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.akvaryum_su_degisimi_son
+        data:
+          date: "{{ now().date().isoformat() }}"
+  akvaryum_filtre_temizligi_yapildi:
+    alias: "Filtre Temizliği Yapıldı"
+    icon: mdi:air-filter
+    sequence:
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.akvaryum_filtre_temizligi_son
+        data:
+          date: "{{ now().date().isoformat() }}"
+  akvaryum_cam_temizligi_yapildi:
+    alias: "Cam Temizliği Yapıldı"
+    icon: mdi:spray-bottle
+    sequence:
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.akvaryum_cam_temizligi_son
+        data:
+          date: "{{ now().date().isoformat() }}"

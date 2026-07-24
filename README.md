@@ -185,6 +185,10 @@ Hard-won lessons, in the order they will bite you:
 5. **The bridge logs everything** — `journalctl -u xr15 -f` shows each connect attempt, packet write, and error in real time (the systemd unit runs Python unbuffered specifically so this works).
 6. **Read the device's actual state** when in doubt: `curl "http://127.0.0.1:8765/dump?attr=511&variant=3"` returns the light's stored intensity as a raw C2 response frame (attr 500 = schedule, 510 = playback). If your value reads back, the write path works and the problem is elsewhere.
 
+#### Optional: maintenance reminders
+
+`akvaryum_bakim_helpers.yaml` + `akvaryum_bakim_automations.yaml` add dashboard-driven maintenance tracking for three tasks (water change, filter cleaning, glass cleaning): a last-done date and an adjustable interval per task, a "days remaining" template sensor (negative = overdue), a one-tap "done today" script wired to dashboard cards that turn red when due, and a daily 10:00 persistent notification listing anything due. Paste the helpers into `configuration.yaml` (merging top-level sections with any you already have), append the automation to `automations.yaml`, and use the 🧽 BAKIM section in `dashboards/akvaryum.yaml` as the UI. Swap `persistent_notification.create` for `notify.mobile_app_*` to get reminders on your phone.
+
 #### Optional: automatic daily on/off schedule
 
 The device's own onboard schedule already ramps brightness up and down across the day once the light is on. If you also want it to turn fully on/off at set times (e.g. a full blackout overnight), two files are provided:

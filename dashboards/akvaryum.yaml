@@ -583,6 +583,187 @@ views:
                       state:
                         - color: "#ffffff"
                         - font-size: 16px
+          - type: vertical-stack
+            view_layout:
+              grid-column: 1 / -1
+            cards:
+              - type: markdown
+                content: |
+                  ## 🧽 BAKIM
+                card_mod:
+                  style: |
+                    ha-card {
+                      background: linear-gradient(135deg,#04101f,#071b33);
+                      color: white;
+                      border-radius: 22px;
+                      padding: 10px 18px;
+                      border: 1px solid rgba(80,160,255,.35);
+                      box-shadow: 0 0 25px rgba(0,120,255,.25);
+                    }
+              - type: horizontal-stack
+                cards:
+                  - type: custom:button-card
+                    entity: sensor.su_degisimi_kalan_gun
+                    name: Su Değişimi
+                    icon: mdi:water-sync
+                    show_state: false
+                    show_label: true
+                    label: >-
+                      [[[ var k = parseInt(states['sensor.su_degisimi_kalan_gun'].state);
+                          var son = states['input_datetime.akvaryum_su_degisimi_son'].state;
+                          if (isNaN(k)) return 'İlk kaydı yapın';
+                          if (k < 0) return '⚠️ ' + (-k) + ' gün gecikti';
+                          if (k === 0) return '⚠️ Bugün yapılmalı';
+                          return '✅ ' + k + ' gün kaldı — son: ' + son; ]]]
+                    tap_action:
+                      action: call-service
+                      service: script.akvaryum_su_degisimi_yapildi
+                      confirmation:
+                        text: Su değişimi bugün yapıldı olarak işaretlensin mi?
+                    styles:
+                      card:
+                        - height: 130px
+                        - border-radius: 18px
+                        - background: >-
+                            [[[ return parseInt(states['sensor.su_degisimi_kalan_gun'].state) <= 0
+                              ? 'linear-gradient(135deg,#4f0a0a,#801515)'
+                              : 'linear-gradient(135deg,#04101f,#071b33)' ]]]
+                        - border: >-
+                            [[[ return parseInt(states['sensor.su_degisimi_kalan_gun'].state) <= 0
+                              ? '1px solid rgba(255,60,60,.6)'
+                              : '1px solid rgba(80,160,255,.35)' ]]]
+                        - box-shadow: >-
+                            [[[ return parseInt(states['sensor.su_degisimi_kalan_gun'].state) <= 0
+                              ? '0 0 30px rgba(255,60,60,.4)'
+                              : '0 0 20px rgba(0,120,255,.20)' ]]]
+                        - color: white
+                      icon:
+                        - width: 45px
+                        - color: >-
+                            [[[ return parseInt(states['sensor.su_degisimi_kalan_gun'].state) <= 0
+                              ? '#ff4444' : '#2f8cff' ]]]
+                      name:
+                        - font-size: 14px
+                        - font-weight: bold
+                      label:
+                        - font-size: 12px
+                        - color: >-
+                            [[[ return parseInt(states['sensor.su_degisimi_kalan_gun'].state) <= 0
+                              ? '#ff4444' : '#4caf50' ]]]
+                  - type: custom:button-card
+                    entity: sensor.filtre_temizligi_kalan_gun
+                    name: Filtre Temizliği
+                    icon: mdi:air-filter
+                    show_state: false
+                    show_label: true
+                    label: >-
+                      [[[ var k = parseInt(states['sensor.filtre_temizligi_kalan_gun'].state);
+                          var son = states['input_datetime.akvaryum_filtre_temizligi_son'].state;
+                          if (isNaN(k)) return 'İlk kaydı yapın';
+                          if (k < 0) return '⚠️ ' + (-k) + ' gün gecikti';
+                          if (k === 0) return '⚠️ Bugün yapılmalı';
+                          return '✅ ' + k + ' gün kaldı — son: ' + son; ]]]
+                    tap_action:
+                      action: call-service
+                      service: script.akvaryum_filtre_temizligi_yapildi
+                      confirmation:
+                        text: Filtre temizliği bugün yapıldı olarak işaretlensin mi?
+                    styles:
+                      card:
+                        - height: 130px
+                        - border-radius: 18px
+                        - background: >-
+                            [[[ return parseInt(states['sensor.filtre_temizligi_kalan_gun'].state) <= 0
+                              ? 'linear-gradient(135deg,#4f0a0a,#801515)'
+                              : 'linear-gradient(135deg,#04101f,#071b33)' ]]]
+                        - border: >-
+                            [[[ return parseInt(states['sensor.filtre_temizligi_kalan_gun'].state) <= 0
+                              ? '1px solid rgba(255,60,60,.6)'
+                              : '1px solid rgba(80,160,255,.35)' ]]]
+                        - box-shadow: >-
+                            [[[ return parseInt(states['sensor.filtre_temizligi_kalan_gun'].state) <= 0
+                              ? '0 0 30px rgba(255,60,60,.4)'
+                              : '0 0 20px rgba(0,120,255,.20)' ]]]
+                        - color: white
+                      icon:
+                        - width: 45px
+                        - color: >-
+                            [[[ return parseInt(states['sensor.filtre_temizligi_kalan_gun'].state) <= 0
+                              ? '#ff4444' : '#2f8cff' ]]]
+                      name:
+                        - font-size: 14px
+                        - font-weight: bold
+                      label:
+                        - font-size: 12px
+                        - color: >-
+                            [[[ return parseInt(states['sensor.filtre_temizligi_kalan_gun'].state) <= 0
+                              ? '#ff4444' : '#4caf50' ]]]
+                  - type: custom:button-card
+                    entity: sensor.cam_temizligi_kalan_gun
+                    name: Cam Temizliği
+                    icon: mdi:spray-bottle
+                    show_state: false
+                    show_label: true
+                    label: >-
+                      [[[ var k = parseInt(states['sensor.cam_temizligi_kalan_gun'].state);
+                          var son = states['input_datetime.akvaryum_cam_temizligi_son'].state;
+                          if (isNaN(k)) return 'İlk kaydı yapın';
+                          if (k < 0) return '⚠️ ' + (-k) + ' gün gecikti';
+                          if (k === 0) return '⚠️ Bugün yapılmalı';
+                          return '✅ ' + k + ' gün kaldı — son: ' + son; ]]]
+                    tap_action:
+                      action: call-service
+                      service: script.akvaryum_cam_temizligi_yapildi
+                      confirmation:
+                        text: Cam temizliği bugün yapıldı olarak işaretlensin mi?
+                    styles:
+                      card:
+                        - height: 130px
+                        - border-radius: 18px
+                        - background: >-
+                            [[[ return parseInt(states['sensor.cam_temizligi_kalan_gun'].state) <= 0
+                              ? 'linear-gradient(135deg,#4f0a0a,#801515)'
+                              : 'linear-gradient(135deg,#04101f,#071b33)' ]]]
+                        - border: >-
+                            [[[ return parseInt(states['sensor.cam_temizligi_kalan_gun'].state) <= 0
+                              ? '1px solid rgba(255,60,60,.6)'
+                              : '1px solid rgba(80,160,255,.35)' ]]]
+                        - box-shadow: >-
+                            [[[ return parseInt(states['sensor.cam_temizligi_kalan_gun'].state) <= 0
+                              ? '0 0 30px rgba(255,60,60,.4)'
+                              : '0 0 20px rgba(0,120,255,.20)' ]]]
+                        - color: white
+                      icon:
+                        - width: 45px
+                        - color: >-
+                            [[[ return parseInt(states['sensor.cam_temizligi_kalan_gun'].state) <= 0
+                              ? '#ff4444' : '#2f8cff' ]]]
+                      name:
+                        - font-size: 14px
+                        - font-weight: bold
+                      label:
+                        - font-size: 12px
+                        - color: >-
+                            [[[ return parseInt(states['sensor.cam_temizligi_kalan_gun'].state) <= 0
+                              ? '#ff4444' : '#4caf50' ]]]
+              - type: entities
+                title: Bakım Aralıkları
+                entities:
+                  - entity: input_number.akvaryum_su_degisimi_aralik
+                    name: Su Değişimi (gün)
+                  - entity: input_number.akvaryum_filtre_temizligi_aralik
+                    name: Filtre Temizliği (gün)
+                  - entity: input_number.akvaryum_cam_temizligi_aralik
+                    name: Cam Temizliği (gün)
+                card_mod:
+                  style: |
+                    ha-card {
+                      background: linear-gradient(135deg,#04101f,#071b33);
+                      color: white;
+                      border-radius: 22px;
+                      border: 1px solid rgba(80,160,255,.35);
+                      box-shadow: 0 0 25px rgba(0,120,255,.20);
+                    }
           - type: markdown
             view_layout:
               grid-column: 1 / -1

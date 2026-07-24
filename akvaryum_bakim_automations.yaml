@@ -1,0 +1,37 @@
+# Optional: daily maintenance reminder. Append to automations.yaml
+# (alongside the xr15_schedule_automations.yaml entries).
+#
+# Fires every morning at 10:00 if any maintenance task is due or overdue
+# (its *_kalan_gun sensor at 0 or below) and posts a persistent
+# notification listing what needs doing. The notification clears itself
+# the next morning once everything is stamped done via the dashboard
+# buttons (or replace persistent_notification.create with notify.mobile_app_*
+# to get it on your phone instead).
+- id: akvaryum_bakim_hatirlatici
+  alias: "Akvaryum - Bakım Hatırlatıcı"
+  trigger:
+    - platform: time
+      at: "10:00:00"
+  condition:
+    - condition: template
+      value_template: >
+        {{ states('sensor.su_degisimi_kalan_gun') | int(1) <= 0
+           or states('sensor.filtre_temizligi_kalan_gun') | int(1) <= 0
+           or states('sensor.cam_temizligi_kalan_gun') | int(1) <= 0 }}
+  action:
+    - service: persistent_notification.create
+      data:
+        notification_id: akvaryum_bakim
+        title: "🧽 Akvaryum Bakım Zamanı"
+        message: >
+          {% set gorevler = [
+            ('Su değişimi', states('sensor.su_degisimi_kalan_gun') | int(1)),
+            ('Filtre temizliği', states('sensor.filtre_temizligi_kalan_gun') | int(1)),
+            ('Cam temizliği', states('sensor.cam_temizligi_kalan_gun') | int(1)),
+          ] %}
+          {% for ad, kalan in gorevler if kalan <= 0 %}
+          - **{{ ad }}**{% if kalan < 0 %} ({{ -kalan }} gün gecikti){% endif %}
+          {% endfor %}
+
+          Yapılınca dashboard'daki karta dokunarak işaretle. 🪸
+  mode: single
