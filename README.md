@@ -1,5 +1,7 @@
 # EcoTech Marine Radion XR15w G5 Pro — Home Assistant BLE Integration
 
+> 🎮 **Looking for the iOS game?** [Orbit Dash](OrbitDash/) — a complete, monetization-ready iPhone arcade game — lives in the [`OrbitDash/`](OrbitDash/README.md) directory of this repo.
+
 Control your **EcoTech Marine Radion XR15w G5 Pro** aquarium light via Bluetooth Low Energy from Home Assistant — with no official API, no cloud, no Mobius app required.
 
 This project was built by **reverse-engineering the undocumented Mobius BLE protocol** (C2 protocol over GATT).
