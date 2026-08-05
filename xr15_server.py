@@ -192,7 +192,7 @@ async def write_schedule(slots, intensity=500, label=""):
         print(f"\n  ✓ Tamamlandı!")
     finally:
         try:
-            await client.disconnect()
+            await asyncio.wait_for(client.disconnect(), 10)
         except Exception:
             pass
 
@@ -237,7 +237,7 @@ async def write_intensity(intensity, label=""):
         print("  ✓ Tamamlandı!")
     finally:
         try:
-            await client.disconnect()
+            await asyncio.wait_for(client.disconnect(), 10)
         except Exception:
             pass
 
@@ -246,14 +246,24 @@ _state = "unknown"
 _last_result = {"ok": None, "label": None, "error": None, "at": None}
 _ble_lock = asyncio.Lock()
 
+# Bir BLE işinin alabileceği azami süre. Bleak/BlueZ nadiren de olsa
+# süresiz asılı kalabiliyor - kilidi sonsuza dek tutup arkasındaki her
+# komutu bloklamasın diye işi iptal edip FAILED olarak kaydediyoruz.
+BLE_JOB_TIMEOUT = 120
+
 async def _run_ble(coro, label=""):
     global _last_result
     async with _ble_lock:
         _last_result = {"ok": None, "label": label, "error": None,
                         "at": datetime.now().isoformat(timespec="seconds")}
         try:
-            await coro
+            await asyncio.wait_for(coro, timeout=BLE_JOB_TIMEOUT)
             _last_result = {"ok": True, "label": label, "error": None,
+                            "at": datetime.now().isoformat(timespec="seconds")}
+        except asyncio.TimeoutError:
+            print(f"BLE zaman aşımı ({BLE_JOB_TIMEOUT}s): {label}")
+            _last_result = {"ok": False, "label": label,
+                            "error": f"timed out after {BLE_JOB_TIMEOUT}s",
                             "at": datetime.now().isoformat(timespec="seconds")}
         except Exception as e:
             print(f"BLE hata: {e}")
@@ -293,7 +303,7 @@ async def read_attr(attr_id, extra=b"", wait=8.0):
         await asyncio.sleep(wait)
     finally:
         try:
-            await client.disconnect()
+            await asyncio.wait_for(client.disconnect(), 10)
         except Exception:
             pass
     return received
