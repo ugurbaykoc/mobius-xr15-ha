@@ -136,10 +136,33 @@ def build_original_schedule():
     slots += [bytes(42)] * (25 - len(slots))
     return slots
 
+async def _bluez_reset():
+    """BlueZ'de asılı kalmış bağlanma girişimini iptal et.
+
+    Python tarafında iptal edilen (timeout) bir connect, BlueZ
+    seviyesinde devam eder: bleak'te bunu durduracak bir yol yok, çünkü
+    yarım kalmış client'ın disconnect'i de temizleyemiyor. Sonuç olarak
+    sonraki her denemeye org.bluez.Error.InProgress dönüyor ve bu durum
+    servis yeniden başlatılana kadar sürüyor. bluetoothctl disconnect
+    bunu dışarıdan temizler.
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "bluetoothctl", "disconnect", ADDRESS,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(proc.wait(), 15)
+        print("  BlueZ durumu temizlendi (bluetoothctl disconnect)")
+    except BaseException as e:
+        print(f"  BlueZ temizleme başarısız: {e}")
+    await asyncio.sleep(2)  # BlueZ'in oturması için
+
+
 async def _safe_connect(timeout=30, retries=3):
     for attempt in range(1, retries + 1):
+        client = BleakClient(ADDRESS, timeout=timeout)
         try:
-            client = BleakClient(ADDRESS, timeout=timeout)
             await client.connect()
             await asyncio.sleep(1.5)  # BlueZ servis discovery için bekle
             # Servisler hazır mı kontrol et
@@ -150,13 +173,21 @@ async def _safe_connect(timeout=30, retries=3):
                 raise RuntimeError("TX karakteristiği bulunamadı")
             print(f"  Bağlandı (deneme {attempt})")
             return client
-        except Exception as e:
+        except BaseException as e:
+            # BaseException, çünkü asyncio.CancelledError (iş zaman aşımına
+            # uğradığında gelir) Exception'dan türemiyor: sadece Exception
+            # yakalanırsa timeout'ta bu temizlik hiç çalışmaz ve BlueZ'de
+            # yarım kalmış bir bağlanma girişimi kalır.
             print(f"  Bağlantı denemesi {attempt} başarısız: {e}")
             try:
-                await client.disconnect()
-            except Exception:
+                await asyncio.wait_for(client.disconnect(), 10)
+            except BaseException:
                 pass
-            if attempt < retries:
+            if isinstance(e, asyncio.CancelledError):
+                raise
+            if "InProgress" in str(e):
+                await _bluez_reset()
+            elif attempt < retries:
                 await asyncio.sleep(3)
     raise RuntimeError(f"{retries} denemede bağlantı kurulamadı")
 
@@ -262,6 +293,10 @@ async def _run_ble(coro, label=""):
                             "at": datetime.now().isoformat(timespec="seconds")}
         except asyncio.TimeoutError:
             print(f"BLE zaman aşımı ({BLE_JOB_TIMEOUT}s): {label}")
+            # İptal edilen coroutine'in dışındayız, burada await güvenli:
+            # BlueZ'de yarım kalan bağlanma girişimini hemen temizle ki
+            # sonraki komutlar InProgress'e takılmasın.
+            await _bluez_reset()
             _last_result = {"ok": False, "label": label,
                             "error": f"timed out after {BLE_JOB_TIMEOUT}s",
                             "at": datetime.now().isoformat(timespec="seconds")}
