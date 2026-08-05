@@ -1,7 +1,11 @@
 [Unit]
 Description=EcoTech Marine XR15w BLE HTTP Bridge
-After=network.target bluetooth.target
-Wants=bluetooth.target
+After=network.target bluetooth.service
+Requires=bluetooth.service
+# BlueZ yeniden başlatıldığında köprünün D-Bus bağlantısı geçersiz kalır
+# ve her komut asılı kalır. PartOf, bluetooth.service restart/stop
+# edildiğinde bu servisin de otomatik yeniden başlatılmasını sağlar.
+PartOf=bluetooth.service
 
 [Service]
 Type=simple
