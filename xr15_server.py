@@ -235,16 +235,44 @@ async def turn_on():
     await write_schedule(build_original_schedule(), intensity=500, label="IŞIĞI AÇ")
     print("  → Işık açıldı!")
 
-def build_flat_schedule(ch_vals):
-    """Aynı renk karışımını orijinal 11 zaman noktasının hepsine yazar."""
-    times = [0, 360, 480, 600, 720, 840, 960, 1080, 1200, 1320, 1410]
-    slots = [make_item_42(t, 0x01, ch_vals) for t in times]
+# Orijinal schedule'ın 11 zaman noktası (dakika cinsinden) ve bunlara
+# karşılık gelen gün içi parlaklık eğrisi. Eğri, orijinal schedule'ın
+# brightness (kanal 1) profilinden alındı: şafak → öğle tepesi → gün batımı.
+SCHEDULE_TIMES = [0, 360, 480, 600, 720, 840, 960, 1080, 1200, 1320, 1410]
+DAY_CURVE      = [0.2, 0.4, 0.6, 0.8, 1.0, 1.0, 0.8, 0.6, 0.4, 0.2, 0.1]
+
+# Kanal 1 schedule'ın kendi master dimmer'ı: 0 olduğunda diğer kanallar
+# ne olursa olsun ışık kapalı kalıyor (deneyle doğrulandı). Bu yüzden gün
+# eğrisini sadece bu kanala uyguluyoruz - renk kanalları sabit kalınca
+# renk dengesi her saatte aynı, sadece parlaklık değişiyor.
+MASTER_CHANNEL = 1
+
+
+def build_flat_schedule(ch_vals, curve=True):
+    """Renk tarifini gün boyu 11 zaman noktasına yazar.
+
+    curve=True: renk kanalları sabit kalır, master dimmer DAY_CURVE ile
+    ölçeklenir. Cihaz ardışık slotlar arasında geçiş yaptığı için sonuç,
+    Mobius uygulamasındaki gibi sabah yumuşak açılan, öğlen tepe yapan ve
+    akşam sönen bir gün profilidir.
+
+    curve=False: eski davranış, her slotta birebir aynı değerler (gün
+    boyu sabit çıkış).
+    """
+    master = int(ch_vals.get(MASTER_CHANNEL, 0))
+    slots = []
+    for time_min, factor in zip(SCHEDULE_TIMES, DAY_CURVE):
+        vals = dict(ch_vals)
+        if curve:
+            vals[MASTER_CHANNEL] = max(0, min(1000, round(master * factor)))
+        slots.append(make_item_42(time_min, 0x01, vals))
     slots += [bytes(42)] * (25 - len(slots))
     return slots
 
-async def apply_recipe(ch_vals, intensity):
-    await write_schedule(build_flat_schedule(ch_vals), intensity=intensity,
-                         label=f"RENK TARİFİ UYGULA (intensity={intensity})")
+async def apply_recipe(ch_vals, intensity, curve=True):
+    sekil = "gün eğrisi" if curve else "sabit"
+    await write_schedule(build_flat_schedule(ch_vals, curve), intensity=intensity,
+                         label=f"RENK TARİFİ UYGULA ({sekil}, intensity={intensity})")
     print("  → Tarif uygulandı!")
 
 async def write_intensity(intensity, label=""):
@@ -368,7 +396,12 @@ async def handle_dump(request):
     )
 
 async def handle_apply(request):
-    """POST /apply — JSON: {"channels": {"21": 800, ...}, "intensity": 1000}"""
+    """POST /apply — JSON: {"channels": {"21": 800, ...}, "intensity": 1000,
+                            "curve": "ramp"|"flat"}
+
+    curve varsayılan olarak "ramp": gün boyu yumuşak geçiş (bkz.
+    build_flat_schedule). "flat" gönderilirse eski sabit davranış.
+    """
     global _state
     try:
         data = await request.json()
@@ -376,9 +409,13 @@ async def handle_apply(request):
         intensity = int(data.get("intensity", 500))
     except (ValueError, TypeError):
         return web.json_response({"error": "bad request"}, status=400)
+    curve = str(data.get("curve", "ramp")).lower() != "flat"
     _state = "on" if intensity > 0 else "off"
-    asyncio.create_task(_run_ble(apply_recipe(ch_vals, intensity), f"apply (intensity {intensity})"))
-    return web.json_response({"state": _state, "channels": ch_vals, "intensity": intensity})
+    asyncio.create_task(_run_ble(apply_recipe(ch_vals, intensity, curve),
+                                 f"apply (intensity {intensity})"))
+    return web.json_response({"state": _state, "channels": ch_vals,
+                              "intensity": intensity,
+                              "curve": "ramp" if curve else "flat"})
 
 async def handle_intensity(request):
     """GET /intensity/{value} — schedule'a dokunmadan parlaklık (0 = karanlık)."""

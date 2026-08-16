@@ -167,6 +167,10 @@ For day/night timing, use the auto on/off schedule below rather than editing per
 
 > ⚠️ Editing several sliders and then hitting **Apply Schedule** issues one full 25-slot BLE write (several seconds, ~6 packets). Don't wire anything to auto-apply on every single slider tick — batch your edits, then apply once.
 
+**Daily ramp.** The light plays a *time-of-day* schedule and transitions between consecutive slots, which is how the Mobius app produces its gradual sunrise/sunset. The bridge writes the recipe across 11 time points with the master dimmer (channel 1) scaled by a daily curve — 20 % at midnight, rising to 100 % at 12:00–14:00, easing back to 10 % by 23:30 — while the colour channels stay fixed, so the colour balance is identical at every hour and only the brightness moves. Post `"curve": "flat"` to `/apply` for the older constant-output behaviour.
+
+> Channel 1 gates everything: at 0 the light stays dark no matter what the colour channels say, which is why the UI calls it **Master Dimmer**. The daily curve scales relative to whatever you set it to, so a master of 600 peaks at 600.
+
 A **Bridge Status** diagnostic sensor on the device page shows the outcome of every BLE command (`OK: off`, `FAILED: apply (intensity 1000)` with the error text as an attribute) polled from the bridge every 30 s, and the light/button entities go *unavailable* if the bridge itself stops responding. Since HA only talks HTTP, HA needs **no Bluetooth access at all** — no Docker Bluetooth passthrough, no HA Bluetooth integration, no ESPHome proxy. Only the host running `xr15_server.py` needs a working BlueZ + adapter in range of the light.
 
 #### Troubleshooting (read this before blaming the code)
