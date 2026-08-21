@@ -136,6 +136,20 @@ def build_original_schedule():
     slots += [bytes(42)] * (25 - len(slots))
     return slots
 
+async def _run_cmd(*args, timeout=20):
+    """Harici komutu çalıştır; çıktıyı döndür, asla exception fırlatma."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout)
+        return proc.returncode, (out or b"").decode(errors="replace").strip()
+    except BaseException as e:
+        return None, str(e)
+
+
 async def _bluez_reset():
     """BlueZ'de asılı kalmış bağlanma girişimini iptal et.
 
@@ -146,17 +160,33 @@ async def _bluez_reset():
     servis yeniden başlatılana kadar sürüyor. bluetoothctl disconnect
     bunu dışarıdan temizler.
     """
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            "bluetoothctl", "disconnect", ADDRESS,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await asyncio.wait_for(proc.wait(), 15)
+    rc, out = await _run_cmd("bluetoothctl", "disconnect", ADDRESS)
+    if rc == 0:
         print("  BlueZ durumu temizlendi (bluetoothctl disconnect)")
-    except BaseException as e:
-        print(f"  BlueZ temizleme başarısız: {e}")
+    else:
+        print(f"  BlueZ temizleme sonucu (rc={rc}): {out}")
     await asyncio.sleep(2)  # BlueZ'in oturması için
+
+
+async def _adapter_power_cycle():
+    """Bluetooth adaptörünü kapatıp aç - elle 'systemctl restart bluetooth'
+    yapmanın root gerektirmeyen karşılığı.
+
+    Arka arkaya başarısız olan işlerden sonra adaptörün kendisi takılmış
+    olabiliyor (cihaz taramada bile görünmez oluyor). bluetoothctl power
+    off/on adaptörü sıfırlar ve bunu normal kullanıcı olarak yapabiliriz;
+    servis restart'ı ise root ister - üstelik xr15.service PartOf=
+    bluetooth.service olduğu için köprünün kendisini de öldürürdü.
+    """
+    print("  Adaptör sıfırlanıyor (bluetoothctl power off/on)...")
+    await _run_cmd("bluetoothctl", "power", "off")
+    await asyncio.sleep(3)
+    rc, out = await _run_cmd("bluetoothctl", "power", "on")
+    if rc == 0:
+        print("  Adaptör tekrar açıldı")
+    else:
+        print(f"  Adaptör açılamadı (rc={rc}): {out}")
+    await asyncio.sleep(5)  # adaptörün taramaya hazır olması için
 
 
 async def _safe_connect(timeout=30, retries=3):
@@ -305,21 +335,35 @@ _state = "unknown"
 _last_result = {"ok": None, "label": None, "error": None, "at": None}
 _ble_lock = asyncio.Lock()
 
+# Arka arkaya kaç hatadan sonra adaptör sıfırlansın.
+_consecutive_failures = 0
+ESCALATE_AFTER = 2
+
 # Bir BLE işinin alabileceği azami süre. Bleak/BlueZ nadiren de olsa
 # süresiz asılı kalabiliyor - kilidi sonsuza dek tutup arkasındaki her
 # komutu bloklamasın diye işi iptal edip FAILED olarak kaydediyoruz.
 BLE_JOB_TIMEOUT = 120
 
 async def _run_ble(coro, label=""):
-    global _last_result
+    global _last_result, _consecutive_failures
     async with _ble_lock:
+        # Arka arkaya başarısızlıklarda adaptörün kendisi takılmış
+        # olabilir; bir sonraki işi denemeden önce sıfırla. Her
+        # başarısızlıkta değil, ESCALATE_AFTER'ın katlarında yapıyoruz ki
+        # üst üste hata alırken her komut power cycle beklemesin.
+        if _consecutive_failures and _consecutive_failures % ESCALATE_AFTER == 0:
+            print(f"  {_consecutive_failures} ardışık hata - adaptör sıfırlanıyor")
+            await _adapter_power_cycle()
+
         _last_result = {"ok": None, "label": label, "error": None,
                         "at": datetime.now().isoformat(timespec="seconds")}
         try:
             await asyncio.wait_for(coro, timeout=BLE_JOB_TIMEOUT)
+            _consecutive_failures = 0
             _last_result = {"ok": True, "label": label, "error": None,
                             "at": datetime.now().isoformat(timespec="seconds")}
         except asyncio.TimeoutError:
+            _consecutive_failures += 1
             print(f"BLE zaman aşımı ({BLE_JOB_TIMEOUT}s): {label}")
             # İptal edilen coroutine'in dışındayız, burada await güvenli:
             # BlueZ'de yarım kalan bağlanma girişimini hemen temizle ki
@@ -329,6 +373,7 @@ async def _run_ble(coro, label=""):
                             "error": f"timed out after {BLE_JOB_TIMEOUT}s",
                             "at": datetime.now().isoformat(timespec="seconds")}
         except Exception as e:
+            _consecutive_failures += 1
             print(f"BLE hata: {e}")
             _last_result = {"ok": False, "label": label, "error": str(e),
                             "at": datetime.now().isoformat(timespec="seconds")}
@@ -346,7 +391,22 @@ async def handle_off(request):
     return web.json_response({"state": "off"})
 
 async def handle_status(request):
-    return web.json_response({"state": _state, "last_result": _last_result})
+    return web.json_response({"state": _state, "last_result": _last_result,
+                              "consecutive_failures": _consecutive_failures})
+
+
+async def handle_reset(request):
+    """POST /reset — Bluetooth'u elle onar (asılı bağlantı + adaptör sıfırla).
+
+    'systemctl restart bluetooth' için SSH'a girmeye gerek kalmasın diye:
+    HA'daki Reset Bluetooth düğmesi burayı çağırır.
+    """
+    global _consecutive_failures
+    async with _ble_lock:
+        await _bluez_reset()
+        await _adapter_power_cycle()
+        _consecutive_failures = 0
+    return web.json_response({"reset": "ok"})
 
 async def read_attr(attr_id, extra=b"", wait=8.0):
     """GET gönder, cihazın notification cevaplarını topla, ham bytes döndür."""
@@ -447,6 +507,7 @@ async def main():
         app.router.add_post("/apply", handle_apply)
         app.router.add_get("/intensity/{value}", handle_intensity)
         app.router.add_get("/dump", handle_dump)
+        app.router.add_post("/reset", handle_reset)
         print("XR15 server başlıyor: http://0.0.0.0:8765")
         runner = web.AppRunner(app)
         await runner.setup()

@@ -75,3 +75,7 @@ class MobiusXR15Client:
     async def async_turn_off(self) -> None:
         """Blank the schedule - the bridge's original, proven off path."""
         await self._request("GET", "/off")
+
+    async def async_reset_bluetooth(self) -> None:
+        """Clear a stuck BLE connection and power-cycle the adapter."""
+        await self._request("POST", "/reset")

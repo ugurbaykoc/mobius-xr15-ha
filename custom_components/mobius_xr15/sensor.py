@@ -62,4 +62,5 @@ class MobiusXR15BridgeSensor(CoordinatorEntity, SensorEntity):
             "bridge_state": data.get("state"),
             "error": last.get("error"),
             "at": last.get("at"),
+            "consecutive_failures": data.get("consecutive_failures"),
         }
