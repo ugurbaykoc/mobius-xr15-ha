@@ -241,7 +241,10 @@ async def _safe_connect(timeout=30, retries=3):
             # uğradığında gelir) Exception'dan türemiyor: sadece Exception
             # yakalanırsa timeout'ta bu temizlik hiç çalışmaz ve BlueZ'de
             # yarım kalmış bir bağlanma girişimi kalır.
-            print(f"  Bağlantı denemesi {attempt} başarısız: {e}")
+            # Tipi de yazıyoruz: bazı bleak hataları boş mesajla geliyor ve
+            # log'da "başarısız:" diye sessiz bir satır bırakıyordu.
+            print(f"  Bağlantı denemesi {attempt} başarısız: "
+                  f"{type(e).__name__}: {e}")
             try:
                 await asyncio.wait_for(client.disconnect(), 10)
             except BaseException:
@@ -251,7 +254,10 @@ async def _safe_connect(timeout=30, retries=3):
             if "InProgress" in str(e):
                 await _bluez_reset()
             elif attempt < retries:
-                await asyncio.sleep(3)
+                # "not found" = cihaz o an yayın yapmıyor. Bağlantı
+                # kapandıktan sonra yeniden reklama başlaması birkaç saniye
+                # sürüyor, o yüzden bu durumda daha uzun bekliyoruz.
+                await asyncio.sleep(8 if "not found" in str(e).lower() else 3)
     raise RuntimeError(f"{retries} denemede bağlantı kurulamadı")
 
 async def write_schedule(slots, intensity=500, label=""):
@@ -372,6 +378,11 @@ _ble_lock = asyncio.Lock()
 _consecutive_failures = 0
 ESCALATE_AFTER = 2
 
+# Bir iş bittikten sonra cihazın yeniden reklam yayınına dönmesi için
+# beklenen süre. Log'da net görülüyor: başarılı bir işin hemen ardından
+# gelen iş "Device not found" ile düşüyordu, çünkü henüz yayında değil.
+POST_JOB_SETTLE = 6
+
 # Telemetri önbelleği: BLE pahalı, HA 30 saniyede bir /status çekiyor.
 # Bu yüzden cihazı arka planda seyrek okuyup sonucu önbellekten servis
 # ediyoruz - HA tarafında ekstra bir yoklama mantığı gerekmiyor.
@@ -431,11 +442,16 @@ async def _run_ble(coro, label="", background=False):
                                 "error": f"timed out after {BLE_JOB_TIMEOUT}s",
                                 "at": datetime.now().isoformat(timespec="seconds")}
         except Exception as e:
-            print(f"BLE hata: {e}")
+            print(f"BLE hata: {type(e).__name__}: {e}")
             if not background:
                 _consecutive_failures += 1
-                _last_result = {"ok": False, "label": label, "error": str(e),
+                _last_result = {"ok": False, "label": label,
+                                "error": f"{type(e).__name__}: {e}",
                                 "at": datetime.now().isoformat(timespec="seconds")}
+        finally:
+            # Kilidi bırakmadan önce bekle ki sıradaki komut cihaz henüz
+            # yayına dönmemişken bağlanmaya çalışmasın.
+            await asyncio.sleep(POST_JOB_SETTLE)
 
 async def handle_on(request):
     global _state
