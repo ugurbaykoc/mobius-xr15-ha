@@ -7,6 +7,7 @@ Kullanım:
 """
 import asyncio
 import os
+import signal
 import struct
 import sys
 from datetime import datetime
@@ -875,6 +876,11 @@ async def main():
         app.router.add_post("/scene", handle_scene)
         app.router.add_post("/attr", handle_attr_write)
         app.router.add_get("/telemetry", handle_telemetry)
+        # Önceki sürecin (restart/kill) BlueZ'de asılı bıraktığı bağlantıyı
+        # temizle: cihaz "bağlı" görünürken reklam yayınlamıyor ve her
+        # tarama "not found" ile dönüyor.
+        print("Açılış: olası asılı bağlantı temizleniyor...")
+        await _bluez_reset()
         print("XR15 server başlıyor: http://0.0.0.0:8765")
         runner = web.AppRunner(app)
         await runner.setup()
@@ -882,7 +888,24 @@ async def main():
         await site.start()
         asyncio.create_task(telemetry_loop())
         asyncio.create_task(idle_disconnect_loop())
-        await asyncio.Event().wait()
+
+        # SIGTERM'de (systemctl restart/stop) bağlantıyı bırak ki cihaz
+        # hemen yeniden yayına geçsin.
+        loop = asyncio.get_event_loop()
+        stopping = asyncio.Event()
+
+        def _on_signal():
+            print("Kapanış sinyali - bağlantı bırakılıyor")
+            stopping.set()
+
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                loop.add_signal_handler(sig, _on_signal)
+            except NotImplementedError:
+                pass
+        await stopping.wait()
+        await drop_session()
+        await runner.cleanup()
 
 if __name__ == "__main__":
     asyncio.run(main())
