@@ -360,7 +360,7 @@ async def write_schedule(slots, intensity=500, label=""):
     print(f"{'='*50}")
     async def job(client, tx, _received):
         async def send(p):
-            await client._backend.write_gatt_char(tx, bytearray(p), False)
+            await _send_raw(client, tx, p)
         msg = 1
         for start in range(0, 25, BATCH):
             end   = min(start + BATCH, 25)
@@ -368,7 +368,7 @@ async def write_schedule(slots, intensity=500, label=""):
             pkt   = mk_set_v24(start, chunk, msg)
             print(f"  sub={start:2d} count={end-start} ({len(pkt)}B) → yazılıyor...")
             await send(pkt)
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.6)
             msg += 1
         await send(mk_simple_set(ATTR_SCHEDULE1_INTENSITY, struct.pack("<H", intensity), msg))
         await asyncio.sleep(0.3); msg += 1
@@ -430,7 +430,7 @@ async def write_intensity(intensity, label=""):
     print(f"\n{'='*50}\n{label}\n{'='*50}")
     async def job(client, tx, _received):
         async def send(p):
-            await client._backend.write_gatt_char(tx, bytearray(p), False)
+            await _send_raw(client, tx, p)
         await send(mk_simple_set(ATTR_SCHEDULE1_INTENSITY, struct.pack("<H", intensity), 1))
         await asyncio.sleep(0.3)
         await send(mk_playback(SCHED_RESUME, 2))
@@ -564,7 +564,7 @@ async def read_attr(attr_id, extra=b"", wait=8.0):
         received.clear()
         pkt = mk_get(attr_id, 1, extra)
         print(f"  GET attr={attr_id} extra={extra.hex() or '-'} gönderiliyor: {pkt.hex()}")
-        await client._backend.write_gatt_char(tx, bytearray(pkt), False)
+        await _send_raw(client, tx, pkt)
         await asyncio.sleep(wait)
         return [("RX", p) for p in list(received)]
     return await with_connection(job)
@@ -609,8 +609,17 @@ def parse_c2_response(packets):
             "truncated": len(body) < 6 + count * elem}
 
 
+# Zayıf hatta cevapsız yazma (write-without-response) akış kontrolü
+# sunmuyor: 352 baytlık paketleri arka arkaya basınca controller tamponu
+# doluyor ve cihaz bağlantıyı düşürüyor - log'da yazmanın ortasında
+# "BLE bağlantısı düştü" olarak görülüyor. Onaylı yazmada her paket
+# karşı taraftan ACK bekliyor, yani hattın hızına göre kendiliğinden
+# yavaşlıyor ve hata sessizce kaybolmak yerine yukarı geliyor.
+ACK_WRITES = os.environ.get("XR15_ACK_WRITES", "1") == "1"
+
+
 async def _send_raw(client, tx, pkt):
-    await client._backend.write_gatt_char(tx, bytearray(pkt), False)
+    await client._backend.write_gatt_char(tx, bytearray(pkt), ACK_WRITES)
 
 
 async def _read_on(client, tx, received, specs, wait=1.5):
