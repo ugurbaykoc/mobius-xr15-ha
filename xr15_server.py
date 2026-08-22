@@ -376,15 +376,26 @@ ESCALATE_AFTER = 2
 # ediyoruz - HA tarafında ekstra bir yoklama mantığı gerekmiyor.
 _telemetry = {}
 _telemetry_at = None
-TELEMETRY_INTERVAL = 900
+TELEMETRY_INTERVAL = 1800
 
 # Bir BLE işinin alabileceği azami süre. Bleak/BlueZ nadiren de olsa
 # süresiz asılı kalabiliyor - kilidi sonsuza dek tutup arkasındaki her
 # komutu bloklamasın diye işi iptal edip FAILED olarak kaydediyoruz.
 BLE_JOB_TIMEOUT = 120
 
-async def _run_ble(coro, label=""):
+async def _run_ble(coro, label="", background=False):
+    """BLE işini sıraya alıp çalıştır.
+
+    background=True (telemetri gibi kendi başlattığımız işler):
+    kullanıcının komut geçmişini (_last_result) ezmez ve hata sayacını
+    artırmaz. Aksi halde arka planda sessizce başarısız olan bir okuma,
+    adaptörü durduk yere power-cycle ettirip asıl komutları bozabiliyor.
+    """
     global _last_result, _consecutive_failures
+    if background and _consecutive_failures:
+        print("  sistem zaten hatalı durumda - arka plan işi atlandı")
+        coro.close()  # çalıştırmayacaksak coroutine'i düzgün kapat
+        return
     async with _ble_lock:
         # Arka arkaya başarısızlıklarda adaptörün kendisi takılmış
         # olabilir; bir sonraki işi denemeden önce sıfırla. Her
@@ -394,28 +405,33 @@ async def _run_ble(coro, label=""):
             print(f"  {_consecutive_failures} ardışık hata - adaptör sıfırlanıyor")
             await _adapter_power_cycle()
 
-        _last_result = {"ok": None, "label": label, "error": None,
-                        "at": datetime.now().isoformat(timespec="seconds")}
+        if not background:
+            _last_result = {"ok": None, "label": label, "error": None,
+                            "at": datetime.now().isoformat(timespec="seconds")}
         try:
             await asyncio.wait_for(coro, timeout=BLE_JOB_TIMEOUT)
-            _consecutive_failures = 0
-            _last_result = {"ok": True, "label": label, "error": None,
-                            "at": datetime.now().isoformat(timespec="seconds")}
+            if not background:
+                _consecutive_failures = 0
+                _last_result = {"ok": True, "label": label, "error": None,
+                                "at": datetime.now().isoformat(timespec="seconds")}
         except asyncio.TimeoutError:
-            _consecutive_failures += 1
+            if not background:
+                _consecutive_failures += 1
             print(f"BLE zaman aşımı ({BLE_JOB_TIMEOUT}s): {label}")
             # İptal edilen coroutine'in dışındayız, burada await güvenli:
             # BlueZ'de yarım kalan bağlanma girişimini hemen temizle ki
             # sonraki komutlar InProgress'e takılmasın.
             await _bluez_reset()
-            _last_result = {"ok": False, "label": label,
-                            "error": f"timed out after {BLE_JOB_TIMEOUT}s",
-                            "at": datetime.now().isoformat(timespec="seconds")}
+            if not background:
+                _last_result = {"ok": False, "label": label,
+                                "error": f"timed out after {BLE_JOB_TIMEOUT}s",
+                                "at": datetime.now().isoformat(timespec="seconds")}
         except Exception as e:
-            _consecutive_failures += 1
             print(f"BLE hata: {e}")
-            _last_result = {"ok": False, "label": label, "error": str(e),
-                            "at": datetime.now().isoformat(timespec="seconds")}
+            if not background:
+                _consecutive_failures += 1
+                _last_result = {"ok": False, "label": label, "error": str(e),
+                                "at": datetime.now().isoformat(timespec="seconds")}
 
 async def handle_on(request):
     global _state
@@ -479,26 +495,36 @@ def parse_c2_response(packets):
     Çerçeve: 02 DF op msgid(2) 00 00 len(2) | status(1) attr(2) sub(1)
              count(1) elem_len(1) data | crc(2)
     Gerçek cihaz cevabıyla doğrulandı (attr 511 -> 777).
+
+    Paketler birleştirilerek okunuyor: uzun cevaplar (örn. PhysicalValues
+    dizisi) birden fazla notification'a bölünebiliyor ve tek pakete
+    bakmak gövdeyi yarıda kesiyordu.
     """
-    for p in packets:
-        if len(p) < 15 or p[1] != 0xDF:
-            continue
-        plen = int.from_bytes(p[7:9], "little")
-        body = p[9:9 + plen]
-        if len(body) < 6:
-            continue
-        status, sub, count, elem = body[0], body[3], body[4], body[5]
-        attr = int.from_bytes(body[1:3], "little")
-        data = body[6:6 + count * elem]
-        vals = []
-        if elem:
-            for i in range(count):
-                chunk = data[i * elem:(i + 1) * elem]
-                if len(chunk) == elem:
-                    vals.append(int.from_bytes(chunk, "little"))
-        return {"status": status, "attr": attr, "sub": sub, "count": count,
-                "elem_len": elem, "values": vals, "raw": data.hex()}
-    return None
+    buf = b"".join(packets)
+    start = -1
+    for i in range(len(buf) - 1):
+        if buf[i] == 0x02 and buf[i + 1] == 0xDF:
+            start = i
+            break
+    if start < 0 or len(buf) - start < 15:
+        return None
+    frame = buf[start:]
+    plen = int.from_bytes(frame[7:9], "little")
+    body = frame[9:9 + plen]
+    if len(body) < 6:
+        return None
+    status, sub, count, elem = body[0], body[3], body[4], body[5]
+    attr = int.from_bytes(body[1:3], "little")
+    data = body[6:6 + count * elem]
+    vals = []
+    if elem:
+        for i in range(count):
+            chunk = data[i * elem:(i + 1) * elem]
+            if len(chunk) == elem:
+                vals.append(int.from_bytes(chunk, "little"))
+    return {"status": status, "attr": attr, "sub": sub, "count": count,
+            "elem_len": elem, "values": vals, "raw": data.hex(),
+            "truncated": len(body) < 6 + count * elem}
 
 
 async def with_connection(fn):
@@ -526,7 +552,7 @@ async def _send_raw(client, tx, pkt):
     await client._backend.write_gatt_char(tx, bytearray(pkt), False)
 
 
-async def _read_on(client, tx, received, specs, wait=2.5):
+async def _read_on(client, tx, received, specs, wait=1.5):
     """specs: [(attr, sub, count)] - aynı bağlantıda sırayla oku."""
     out = {}
     for idx, (attr, sub, count) in enumerate(specs, 1):
@@ -632,12 +658,18 @@ async def handle_read(request):
         count = int(request.query.get("count", 1))
     except (TypeError, ValueError):
         return web.json_response({"error": "attr gerekli"}, status=400)
-    async with _ble_lock:
-        try:
-            res = await asyncio.wait_for(read_attributes([(attr, sub, count)]),
-                                         BLE_JOB_TIMEOUT)
-        except BaseException as e:
-            return web.json_response({"error": str(e)}, status=500)
+    # HTTP isteğini sonsuza kadar bekletme: köprü meşgulse hemen 503 dön,
+    # çünkü HA tarafındaki istemcinin zaman aşımı 10 saniye.
+    try:
+        await asyncio.wait_for(_ble_lock.acquire(), 5)
+    except asyncio.TimeoutError:
+        return web.json_response({"error": "köprü meşgul"}, status=503)
+    try:
+        res = await asyncio.wait_for(read_attributes([(attr, sub, count)]), 60)
+    except BaseException as e:
+        return web.json_response({"error": str(e)}, status=500)
+    finally:
+        _ble_lock.release()
     return web.json_response({"attr": attr, "result": res.get(attr)})
 
 
@@ -732,7 +764,12 @@ async def refresh_telemetry():
 async def handle_telemetry(request):
     """GET /telemetry — önbellek; ?refresh=1 ile cihazdan tazele."""
     if request.query.get("refresh") == "1":
-        await _run_ble(refresh_telemetry(), "telemetry")
+        # Arka planda çalıştır: cevabı bekletirsek HA istemcisi zaman aşımına
+        # uğrar. Sonuç bir sonraki /status yoklamasında görünür.
+        asyncio.create_task(_run_ble(refresh_telemetry(), "telemetry",
+                                     background=True))
+        return web.json_response({"refreshing": True, "telemetry": _telemetry,
+                                  "at": _telemetry_at})
     return web.json_response({"telemetry": _telemetry, "at": _telemetry_at})
 
 
@@ -741,7 +778,7 @@ async def telemetry_loop():
     await asyncio.sleep(60)
     while True:
         try:
-            await _run_ble(refresh_telemetry(), "telemetry")
+            await _run_ble(refresh_telemetry(), "telemetry", background=True)
         except Exception as e:
             print(f"telemetri hatası: {e}")
         await asyncio.sleep(TELEMETRY_INTERVAL)
