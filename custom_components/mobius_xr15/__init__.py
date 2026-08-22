@@ -20,7 +20,6 @@ PLATFORMS: list[Platform] = [
     Platform.NUMBER,
     Platform.BUTTON,
     Platform.SENSOR,
-    Platform.SWITCH,
 ]
 
 STATUS_INTERVAL = timedelta(seconds=30)

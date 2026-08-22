@@ -195,19 +195,19 @@ Hard-won lessons, in the order they will bite you:
 6. **The bridge logs everything** — `journalctl -u xr15 -f` shows each connect attempt, packet write, and error in real time (the systemd unit runs Python unbuffered specifically so this works). `curl .../status` gives the last job's verdict, and the same thing appears in HA as the **Bridge Status** sensor.
 7. **Read the device's actual state** when in doubt: `curl "http://127.0.0.1:8765/dump?attr=511&variant=3"` returns the light's stored intensity as a raw C2 response frame (attr 500 = schedule, 510 = playback). If your value reads back, the write path works and the problem is elsewhere.
 
-#### What the protocol dump unlocked (v2.2.0)
+#### What the protocol dump unlocked (v2.3.0)
 
-With the attribute and enum tables from [PROTOCOL.md](PROTOCOL.md), the integration now uses parts of the firmware it previously could not see:
+[PROTOCOL.md](PROTOCOL.md) turned most of this project's guesswork into fact. What is **in use** today:
 
-- **Scenes** — `Feed Mode`, `Thunderstorm`, `Cloud Cover`, `All Off`, `All On`, `All 50%` as buttons. Each is a single small write to attribute 401 rather than a 25-slot schedule, so it lands in about a second and barely touches the BLE link. The firmware animates thunderstorm and cloud cover itself.
-- **Weather in the schedule** — channels 100/101 turn out not to be LEDs but per-slot **Storm Probability** and **Cloud Probability**. They are now sliders alongside the colours and are written into every schedule point.
-- **Telemetry sensors** — LED puck temperature, driver and internal temperature, fan speed, operation state (`Schedule`/`Scene`/`LiveDemo`), error state (real fault codes like `LEDClusterOverTemp`), device clock and firmware version. The bridge reads these on a slow background loop (15 min) and caches them, so Home Assistant polls cost no BLE traffic.
-- **Firmware features as switches** — `Acclimation` (gradual intensity ramp for new corals, attribute 902) and `Lunar Cycle` (attribute 907). State is read back from the device, not assumed.
-- **Channel 31** is `MoonlightWhite` and is now exposed too.
+- **Channels named correctly** — 31 is `MoonlightWhite`, and 100/101 are not LEDs but per-slot **Storm Probability** and **Cloud Probability**. All three are sliders now and ride in the existing, proven schedule write.
+- **Linear interpolation confirmed**, so the daily ramp genuinely fades rather than stepping.
 
-New bridge endpoints backing these: `GET /read?attr=N`, `POST /scene`, `POST /attr`, `GET /telemetry`. Attribute writes read the value's size from the device first, so payloads are correctly sized without hardcoding each attribute's width.
+What is **built but off by default**, and why:
 
-> The device clock sensor is worth a look after setup: the whole schedule runs off the light's own clock (attribute 203), so if it drifts, the ramp drifts with it.
+- **Scene writes** (`POST /scene`, attribute 401) and **generic attribute writes** (`POST /attr`) exist in the bridge but have no Home Assistant entities. On a real device the scene attribute did not answer a read, and writing it at a guessed width made the light **drop the BLE connection and disappear for a minute**, breaking the commands that followed. Attribute writes now refuse to proceed unless the device reports the value's width first — no more guessing.
+- **Telemetry** (`GET /telemetry`) is disabled unless you set `XR15_TELEMETRY=1`. The read path is unverified on this hardware, and a background BLE job that fails is worse than no telemetry at all.
+
+To verify either one safely, work from the shell rather than through Home Assistant — `curl "http://127.0.0.1:8765/dump?attr=401&variant=3"` and compare variants until one returns real data. Nothing in the light's control path depends on them.
 
 #### Optional: maintenance reminders
 

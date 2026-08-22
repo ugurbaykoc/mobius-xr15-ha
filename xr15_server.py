@@ -6,6 +6,7 @@ Kullanım:
     python3 test.py off      # manuel kapat
 """
 import asyncio
+import os
 import struct
 import sys
 from datetime import datetime
@@ -377,6 +378,9 @@ ESCALATE_AFTER = 2
 _telemetry = {}
 _telemetry_at = None
 TELEMETRY_INTERVAL = 1800
+# Telemetri okuması cihazda doğrulanmadığı ve BLE hattı kırılgan olduğu
+# için varsayılan kapalı. Açmak için: XR15_TELEMETRY=1
+TELEMETRY_ENABLED = os.environ.get("XR15_TELEMETRY") == "1"
 
 # Bir BLE işinin alabileceği azami süre. Bleak/BlueZ nadiren de olsa
 # süresiz asılı kalabiliyor - kilidi sonsuza dek tutup arkasındaki her
@@ -579,7 +583,13 @@ async def write_attribute(attr, value, sub=0):
     async def job(client, tx, received):
         info = await _read_on(client, tx, received, [(attr, sub, 1)])
         r = info.get(attr)
-        size = (r or {}).get("elem_len") or 2
+        size = (r or {}).get("elem_len")
+        if not size:
+            # Tahmin etmiyoruz: yanlış boyutta bir yazma cihazın bağlantıyı
+            # düşürmesine (ve bir süre ortadan kaybolmasına) yol açıyor -
+            # sahne yazarken bu yaşandı. Okuyamıyorsak dokunmuyoruz.
+            raise RuntimeError(
+                f"attr {attr} okunamadı, boyutu bilinmiyor - yazma iptal edildi")
         data = int(value).to_bytes(size, "little")
         print(f"  SET {attr} = {value} ({size} bayt)")
         await _send_raw(client, tx, mk_simple_set(attr, data, 10))
@@ -774,7 +784,10 @@ async def handle_telemetry(request):
 
 
 async def telemetry_loop():
-    """Arka planda seyrek telemetri yenileme."""
+    """Arka planda seyrek telemetri yenileme (varsayılan kapalı)."""
+    if not TELEMETRY_ENABLED:
+        print("Telemetri devre dışı (açmak için XR15_TELEMETRY=1)")
+        return
     await asyncio.sleep(60)
     while True:
         try:
