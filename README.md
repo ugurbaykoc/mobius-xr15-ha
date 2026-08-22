@@ -173,6 +173,12 @@ For day/night timing, use the auto on/off schedule below rather than editing per
 
 A **Bridge Status** diagnostic sensor on the device page shows the outcome of every BLE command (`OK: off`, `FAILED: apply (intensity 1000)` with the error text as an attribute) polled from the bridge every 30 s, and the light/button entities go *unavailable* if the bridge itself stops responding. Since HA only talks HTTP, HA needs **no Bluetooth access at all** — no Docker Bluetooth passthrough, no HA Bluetooth integration, no ESPHome proxy. Only the host running `xr15_server.py` needs a working BlueZ + adapter in range of the light.
 
+#### Why the bridge holds the BLE connection open
+
+Every command used to scan for the light and connect from scratch. On a link at about -79 dBm that meant roughly half of them died in discovery — `BleakDeviceNotFoundError` or a bare `TimeoutError` — while the packets and the protocol itself were fine. Worse, the light stops advertising for a few seconds after a disconnect, so a command issued right after a successful one reliably failed.
+
+The bridge now keeps one session open and reuses it, the way the Mobius app does. Consecutive commands cost nothing extra, and connecting is a once-in-a-while event rather than a gamble taken on every button press. The session is dropped and rebuilt automatically when the device disconnects, when a command errors (a half-dead link is not carried into the next command), or after `IDLE_DISCONNECT` seconds of inactivity — that last one matters because **while the bridge is connected, the light does not advertise and the phone app cannot reach it**. Twenty idle minutes hands it back.
+
 #### Troubleshooting (read this before blaming the code)
 
 Hard-won lessons, in the order they will bite you:

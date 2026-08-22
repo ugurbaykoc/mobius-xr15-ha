@@ -224,7 +224,8 @@ async def _adapter_power_cycle():
 
 async def _safe_connect(timeout=30, retries=3):
     for attempt in range(1, retries + 1):
-        client = BleakClient(ADDRESS, timeout=timeout)
+        client = BleakClient(ADDRESS, timeout=timeout,
+                             disconnected_callback=_on_disconnect)
         try:
             await client.connect()
             await asyncio.sleep(1.5)  # BlueZ servis discovery için bekle
@@ -260,20 +261,103 @@ async def _safe_connect(timeout=30, retries=3):
                 await asyncio.sleep(8 if "not found" in str(e).lower() else 3)
     raise RuntimeError(f"{retries} denemede bağlantı kurulamadı")
 
+# ── Kalıcı BLE oturumu ────────────────────────────────────────────
+#
+# Her komut için yeniden taramak-bağlanmak, zayıf sinyalde işlerin
+# yarısını "BleakDeviceNotFoundError" / "TimeoutError" ile düşürüyordu:
+# paketler ve protokol sorunsuzken sadece bağlanma aşaması kumar oluyordu.
+# Mobius uygulaması da bir kez bağlanıp bağlı kalıyor; biz de öyle
+# yapıyoruz. Bağlantı düşerse bir sonraki komut yeniden kurar.
+
+_session = None          # {"client": ..., "tx": ..., "received": [...]}
+_last_job_at = None
+IDLE_DISCONNECT = 1200   # bu kadar saniye komut gelmezse bağlantıyı bırak
+
+
+def _on_disconnect(_client):
+    """Cihaz ya da BlueZ bağlantıyı düşürdüğünde oturumu geçersiz kıl."""
+    global _session
+    if _session is not None:
+        print("  BLE bağlantısı düştü - oturum kapatıldı")
+    _session = None
+
+
+async def ensure_session():
+    """Canlı bir oturum döndür; yoksa ya da koptuysa yeniden kur."""
+    global _session
+    if _session is not None:
+        try:
+            if _session["client"].is_connected:
+                return _session
+        except Exception:
+            pass
+        _session = None
+
+    client = await _safe_connect(timeout=30)
+    received = []
+
+    def on_note(_char, data):
+        received.append(bytes(data))
+
+    try:
+        await client.start_notify(RX_DATA, on_note)
+        await client.start_notify(RX_FINAL, on_note)
+    except Exception as e:
+        print(f"  notify warning: {e}")
+    tx = client.services.get_characteristic(TX_FINAL)
+    _session = {"client": client, "tx": tx, "received": received}
+    return _session
+
+
+async def drop_session():
+    """Oturumu kapat - hata sonrası temiz başlangıç için."""
+    global _session
+    sess, _session = _session, None
+    if sess is None:
+        return
+    try:
+        await asyncio.wait_for(sess["client"].disconnect(), 10)
+    except BaseException:
+        pass
+
+
+async def with_connection(fn):
+    """fn(client, tx, received) çalıştır; bağlantı komutlar arası korunur."""
+    global _last_job_at
+    sess = await ensure_session()
+    _last_job_at = asyncio.get_event_loop().time()
+    try:
+        return await fn(sess["client"], sess["tx"], sess["received"])
+    except BaseException:
+        # Hata sonrası bağlantıya güvenmiyoruz: kapatıyoruz ki sıradaki
+        # komut yarı ölü bir oturumla boğuşmasın.
+        await drop_session()
+        raise
+
+
+async def idle_disconnect_loop():
+    """Uzun süre komut gelmezse bağlantıyı bırak.
+
+    Bağlıyken cihaz reklam yayınlamıyor, dolayısıyla telefon uygulaması
+    da bağlanamıyor. Boştayken bırakmak hem onu serbest bırakır hem de
+    atıl bir bağlantının sessizce ölmesini engeller.
+    """
+    while True:
+        await asyncio.sleep(60)
+        if _session is None or _last_job_at is None:
+            continue
+        idle = asyncio.get_event_loop().time() - _last_job_at
+        if idle > IDLE_DISCONNECT and not _ble_lock.locked():
+            print(f"  {int(idle)}s boşta - bağlantı bırakılıyor")
+            await drop_session()
+
+
 async def write_schedule(slots, intensity=500, label=""):
     BATCH = 8
     print(f"\n{'='*50}")
     print(f"{label}")
     print(f"{'='*50}")
-    client = await _safe_connect(timeout=30)
-    try:
-        def noop(s, d): pass
-        try:
-            await client.start_notify(RX_DATA,  noop)
-            await client.start_notify(RX_FINAL, noop)
-        except Exception as e:
-            print(f"  notify warning: {e}")
-        tx = client.services.get_characteristic(TX_FINAL)
+    async def job(client, tx, _received):
         async def send(p):
             await client._backend.write_gatt_char(tx, bytearray(p), False)
         msg = 1
@@ -290,11 +374,7 @@ async def write_schedule(slots, intensity=500, label=""):
         await send(mk_playback(SCHED_RESUME, msg))
         await asyncio.sleep(1.0)
         print(f"\n  ✓ Tamamlandı!")
-    finally:
-        try:
-            await asyncio.wait_for(client.disconnect(), 10)
-        except Exception:
-            pass
+    await with_connection(job)
 
 async def turn_off():
     await write_schedule([bytes(42)] * 25, intensity=500, label="IŞIĞI SÖNDÜR")
@@ -347,15 +427,7 @@ async def apply_recipe(ch_vals, intensity, curve=True):
 async def write_intensity(intensity, label=""):
     """Sadece intensity + resume yaz — schedule'a dokunmadan (2 paket)."""
     print(f"\n{'='*50}\n{label}\n{'='*50}")
-    client = await _safe_connect(timeout=30)
-    try:
-        def noop(s, d): pass
-        try:
-            await client.start_notify(RX_DATA,  noop)
-            await client.start_notify(RX_FINAL, noop)
-        except Exception as e:
-            print(f"  notify warning: {e}")
-        tx = client.services.get_characteristic(TX_FINAL)
+    async def job(client, tx, _received):
         async def send(p):
             await client._backend.write_gatt_char(tx, bytearray(p), False)
         await send(mk_simple_set(ATTR_SCHEDULE1_INTENSITY, struct.pack("<H", intensity), 1))
@@ -363,11 +435,7 @@ async def write_intensity(intensity, label=""):
         await send(mk_playback(SCHED_RESUME, 2))
         await asyncio.sleep(1.0)
         print("  ✓ Tamamlandı!")
-    finally:
-        try:
-            await asyncio.wait_for(client.disconnect(), 10)
-        except Exception:
-            pass
+    await with_connection(job)
 
 # ── HTTP server ───────────────────────────────────────────────────
 _state = "unknown"
@@ -449,9 +517,11 @@ async def _run_ble(coro, label="", background=False):
                                 "error": f"{type(e).__name__}: {e}",
                                 "at": datetime.now().isoformat(timespec="seconds")}
         finally:
-            # Kilidi bırakmadan önce bekle ki sıradaki komut cihaz henüz
-            # yayına dönmemişken bağlanmaya çalışmasın.
-            await asyncio.sleep(POST_JOB_SETTLE)
+            # Bağlantı ayakta kaldıysa beklemeye gerek yok: sıradaki komut
+            # aynı oturumu kullanacak. Sadece koptuysa cihazın yeniden
+            # yayına dönmesi için soluklanıyoruz.
+            if _session is None:
+                await asyncio.sleep(POST_JOB_SETTLE)
 
 async def handle_on(request):
     global _state
@@ -479,6 +549,9 @@ async def handle_reset(request):
     """
     global _consecutive_failures
     async with _ble_lock:
+        # Oturumu bırakmadan adaptörü sıfırlamak elimizde ölü bir client
+        # bırakırdı; önce temiz kapatıyoruz.
+        await drop_session()
         await _bluez_reset()
         await _adapter_power_cycle()
         _consecutive_failures = 0
@@ -486,26 +559,14 @@ async def handle_reset(request):
 
 async def read_attr(attr_id, extra=b"", wait=8.0):
     """GET gönder, cihazın notification cevaplarını topla, ham bytes döndür."""
-    client = await _safe_connect(timeout=30)
-    received = []
-    try:
-        def on_note(char, data):
-            uuid = getattr(char, "uuid", str(char))
-            tag = "DATA" if str(uuid).startswith("01ff0101") else "FINAL"
-            received.append((tag, bytes(data)))
-        await client.start_notify(RX_DATA, on_note)
-        await client.start_notify(RX_FINAL, on_note)
-        tx = client.services.get_characteristic(TX_FINAL)
+    async def job(client, tx, received):
+        received.clear()
         pkt = mk_get(attr_id, 1, extra)
         print(f"  GET attr={attr_id} extra={extra.hex() or '-'} gönderiliyor: {pkt.hex()}")
         await client._backend.write_gatt_char(tx, bytearray(pkt), False)
         await asyncio.sleep(wait)
-    finally:
-        try:
-            await asyncio.wait_for(client.disconnect(), 10)
-        except Exception:
-            pass
-    return received
+        return [("RX", p) for p in list(received)]
+    return await with_connection(job)
 
 # ── C2 cevap çözümleme + genel attribute okuma/yazma ──────────────
 
@@ -545,27 +606,6 @@ def parse_c2_response(packets):
     return {"status": status, "attr": attr, "sub": sub, "count": count,
             "elem_len": elem, "values": vals, "raw": data.hex(),
             "truncated": len(body) < 6 + count * elem}
-
-
-async def with_connection(fn):
-    """Tek BLE bağlantısı aç, fn(client, tx, received) çalıştır, kapat."""
-    client = await _safe_connect(timeout=30)
-    received = []
-    try:
-        def on_note(_char, data):
-            received.append(bytes(data))
-        try:
-            await client.start_notify(RX_DATA, on_note)
-            await client.start_notify(RX_FINAL, on_note)
-        except Exception as e:
-            print(f"  notify warning: {e}")
-        tx = client.services.get_characteristic(TX_FINAL)
-        return await fn(client, tx, received)
-    finally:
-        try:
-            await asyncio.wait_for(client.disconnect(), 10)
-        except BaseException:
-            pass
 
 
 async def _send_raw(client, tx, pkt):
@@ -841,6 +881,7 @@ async def main():
         site = web.TCPSite(runner, "0.0.0.0", 8765)
         await site.start()
         asyncio.create_task(telemetry_loop())
+        asyncio.create_task(idle_disconnect_loop())
         await asyncio.Event().wait()
 
 if __name__ == "__main__":
