@@ -10,6 +10,9 @@ DEFAULT_URL = "http://127.0.0.1:8765"
 
 MAX_INTENSITY = 1000
 
+# Names confirmed against the Mobius app's own M$VisualID enum (v2.26) -
+# see PROTOCOL.md. Channel 31 is MoonlightWhite, and 100/101 are not LEDs
+# at all but per-slot storm/cloud probabilities.
 CHANNEL_NAMES: dict[int, str] = {
     21: "UV",
     23: "Violet",

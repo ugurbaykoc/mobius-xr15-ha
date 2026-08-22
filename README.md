@@ -2,7 +2,7 @@
 
 Control your **EcoTech Marine Radion XR15w G5 Pro** aquarium light via Bluetooth Low Energy from Home Assistant — with no official API, no cloud, no Mobius app required.
 
-This project was built by **reverse-engineering the undocumented Mobius BLE protocol** (C2 protocol over GATT).
+This project was built by **reverse-engineering the undocumented Mobius BLE protocol** (C2 protocol over GATT). The full attribute, channel and scene tables — extracted from the official app — are in [PROTOCOL.md](PROTOCOL.md).
 
 ---
 
@@ -52,13 +52,13 @@ All Bluetooth work happens in `xr15_server.py` — a small HTTP server talking p
 | 17 | Blue |
 | 19 | Green |
 | 20 | Red |
-| 31 | Unknown |
+| 31 | MoonlightWhite |
 | 32 | Moonlight Blue |
 | 22 | Warm White |
 | 16 | Cool White |
 | 1  | Brightness |
-| 101 | Unknown |
-| 100 | Unknown |
+| 101 | CloudProbability (not an LED) |
+| 100 | StormProbability (not an LED) |
 
 Values are 0–1000 (1000 = 100%).
 
