@@ -20,6 +20,38 @@ RX_FINAL = "01ff0102-ba5e-f4ee-5ca1-eb1e5e4b1ce0"
 ATTR_SCHEDULE1           = 500
 ATTR_SCHEDULE1_INTENSITY = 511
 ATTR_SCHEDULE_PLAYBACK   = 510
+ATTR_CURRENT_SCENE       = 401
+ATTR_OPERATION_STATE     = 104
+ATTR_ERROR_STATE         = 107
+ATTR_PHYSICAL_VALUES     = 101
+ATTR_PUCK_TEMPERATURE    = 1511
+ATTR_FIRMWARE_VERSION    = 1
+ATTR_MINUTE_OF_DAY       = 203
+ATTR_IS_CLOCK_SET        = 200
+ATTR_ACCLIMATION_ENABLED = 902
+ATTR_ACCLIMATION_PERIOD  = 903
+ATTR_ACCLIMATION_START_I = 904
+ATTR_LUNAR_ENABLED       = 907
+
+# M$SceneID - uygulamanın kendi enum'undan (PROTOCOL.md)
+SCENES = {"empty": 0, "feed": 1, "battery_backup": 2, "all_off": 3,
+          "color_cycle": 4, "disco": 5, "thunderstorm": 6,
+          "cloud_cover": 7, "all_on": 8, "all_50": 9}
+
+# M$PhysicalValues - attr 101 dizisindeki indeksler
+PHYSICAL_VALUE_NAMES = {
+    1: "driver_temperature", 2: "motor_temperature", 3: "cluster_temperature",
+    4: "motor_power", 5: "motor_rpm", 6: "battery_voltage", 7: "input_voltage",
+    8: "internal_temperature", 9: "fan_speed", 11: "gallons_per_hour",
+    12: "supply_current", 13: "fan_voltage", 14: "module_temperature",
+    16: "cluster2_temperature",
+}
+
+OPERATION_STATES = {0: "OOB", 1: "LiveDemo", 2: "Scene", 3: "Schedule"}
+ERROR_STATES = {0: "NoError", 1: "Disconnect", 2: "Temperature", 7: "SchedulePlayback",
+                15: "FanFault", 16: "DriverTemp", 17: "LEDChannelShortCircuit",
+                18: "LEDChannelCurrentLeak", 19: "LEDChannelOpenCircuit",
+                20: "LEDClusterThermistor", 21: "LEDClusterOverTemp", 23: "RTC"}
 SCHED_RESUME = bytes([1, 0])
 CHANNELS_42 = [21, 23, 18, 17, 19, 20, 31, 32, 22, 16, 1, 101, 100]
 
@@ -339,6 +371,13 @@ _ble_lock = asyncio.Lock()
 _consecutive_failures = 0
 ESCALATE_AFTER = 2
 
+# Telemetri önbelleği: BLE pahalı, HA 30 saniyede bir /status çekiyor.
+# Bu yüzden cihazı arka planda seyrek okuyup sonucu önbellekten servis
+# ediyoruz - HA tarafında ekstra bir yoklama mantığı gerekmiyor.
+_telemetry = {}
+_telemetry_at = None
+TELEMETRY_INTERVAL = 900
+
 # Bir BLE işinin alabileceği azami süre. Bleak/BlueZ nadiren de olsa
 # süresiz asılı kalabiliyor - kilidi sonsuza dek tutup arkasındaki her
 # komutu bloklamasın diye işi iptal edip FAILED olarak kaydediyoruz.
@@ -392,7 +431,8 @@ async def handle_off(request):
 
 async def handle_status(request):
     return web.json_response({"state": _state, "last_result": _last_result,
-                              "consecutive_failures": _consecutive_failures})
+                              "consecutive_failures": _consecutive_failures,
+                              "telemetry": _telemetry, "telemetry_at": _telemetry_at})
 
 
 async def handle_reset(request):
@@ -430,6 +470,100 @@ async def read_attr(attr_id, extra=b"", wait=8.0):
         except Exception:
             pass
     return received
+
+# ── C2 cevap çözümleme + genel attribute okuma/yazma ──────────────
+
+def parse_c2_response(packets):
+    """0xDF cevabını çöz.
+
+    Çerçeve: 02 DF op msgid(2) 00 00 len(2) | status(1) attr(2) sub(1)
+             count(1) elem_len(1) data | crc(2)
+    Gerçek cihaz cevabıyla doğrulandı (attr 511 -> 777).
+    """
+    for p in packets:
+        if len(p) < 15 or p[1] != 0xDF:
+            continue
+        plen = int.from_bytes(p[7:9], "little")
+        body = p[9:9 + plen]
+        if len(body) < 6:
+            continue
+        status, sub, count, elem = body[0], body[3], body[4], body[5]
+        attr = int.from_bytes(body[1:3], "little")
+        data = body[6:6 + count * elem]
+        vals = []
+        if elem:
+            for i in range(count):
+                chunk = data[i * elem:(i + 1) * elem]
+                if len(chunk) == elem:
+                    vals.append(int.from_bytes(chunk, "little"))
+        return {"status": status, "attr": attr, "sub": sub, "count": count,
+                "elem_len": elem, "values": vals, "raw": data.hex()}
+    return None
+
+
+async def with_connection(fn):
+    """Tek BLE bağlantısı aç, fn(client, tx, received) çalıştır, kapat."""
+    client = await _safe_connect(timeout=30)
+    received = []
+    try:
+        def on_note(_char, data):
+            received.append(bytes(data))
+        try:
+            await client.start_notify(RX_DATA, on_note)
+            await client.start_notify(RX_FINAL, on_note)
+        except Exception as e:
+            print(f"  notify warning: {e}")
+        tx = client.services.get_characteristic(TX_FINAL)
+        return await fn(client, tx, received)
+    finally:
+        try:
+            await asyncio.wait_for(client.disconnect(), 10)
+        except BaseException:
+            pass
+
+
+async def _send_raw(client, tx, pkt):
+    await client._backend.write_gatt_char(tx, bytearray(pkt), False)
+
+
+async def _read_on(client, tx, received, specs, wait=2.5):
+    """specs: [(attr, sub, count)] - aynı bağlantıda sırayla oku."""
+    out = {}
+    for idx, (attr, sub, count) in enumerate(specs, 1):
+        received.clear()
+        await _send_raw(client, tx, mk_get(attr, idx, bytes([sub, count])))
+        await asyncio.sleep(wait)
+        r = parse_c2_response(list(received))
+        out[attr] = r
+        print(f"  GET {attr}: {r['values'] if r else 'cevap yok'}")
+    return out
+
+
+async def read_attributes(specs):
+    return await with_connection(lambda c, t, r: _read_on(c, t, r, specs))
+
+
+async def write_attribute(attr, value, sub=0):
+    """Attribute'u yaz.
+
+    Eleman boyutunu tahmin etmek yerine önce okuyup cihazın bildirdiği
+    elem_len ile yazıyoruz - böylece boyutunu bilmediğimiz attribute'lar
+    da (sahne, acclimation, lunar...) doğru formatta gidiyor.
+    """
+    async def job(client, tx, received):
+        info = await _read_on(client, tx, received, [(attr, sub, 1)])
+        r = info.get(attr)
+        size = (r or {}).get("elem_len") or 2
+        data = int(value).to_bytes(size, "little")
+        print(f"  SET {attr} = {value} ({size} bayt)")
+        await _send_raw(client, tx, mk_simple_set(attr, data, 10))
+        await asyncio.sleep(0.5)
+        received.clear()
+        info2 = await _read_on(client, tx, received, [(attr, sub, 1)])
+        return {"written": value, "size": size,
+                "readback": (info2.get(attr) or {}).get("values")}
+    return await with_connection(job)
+
 
 async def handle_dump(request):
     """GET /dump?attr=511 — cihazdan oku ve ham cevabı JSON olarak döndür."""
@@ -490,6 +624,129 @@ async def handle_intensity(request):
                                  f"intensity {value}"))
     return web.json_response({"state": _state, "intensity": value})
 
+async def handle_read(request):
+    """GET /read?attr=511&sub=0&count=1 — herhangi bir attribute'u oku."""
+    try:
+        attr = int(request.query.get("attr"))
+        sub = int(request.query.get("sub", 0))
+        count = int(request.query.get("count", 1))
+    except (TypeError, ValueError):
+        return web.json_response({"error": "attr gerekli"}, status=400)
+    async with _ble_lock:
+        try:
+            res = await asyncio.wait_for(read_attributes([(attr, sub, count)]),
+                                         BLE_JOB_TIMEOUT)
+        except BaseException as e:
+            return web.json_response({"error": str(e)}, status=500)
+    return web.json_response({"attr": attr, "result": res.get(attr)})
+
+
+async def handle_scene(request):
+    """POST /scene {"scene": "feed"} — anlık sahne (FeedMode, Thunderstorm...)."""
+    global _state
+    try:
+        data = await request.json()
+        raw = data.get("scene")
+        scene = SCENES[raw] if isinstance(raw, str) else int(raw)
+    except (ValueError, TypeError, KeyError):
+        return web.json_response({"error": f"geçersiz sahne; {list(SCENES)}"},
+                                 status=400)
+    if scene == SCENES["all_off"]:
+        _state = "off"
+    elif scene in (SCENES["all_on"], SCENES["all_50"]):
+        _state = "on"
+    asyncio.create_task(_run_ble(write_attribute(ATTR_CURRENT_SCENE, scene),
+                                 f"scene {raw}"))
+    return web.json_response({"scene": raw, "id": scene, "state": _state})
+
+
+async def handle_attr_write(request):
+    """POST /attr {"attr": 902, "value": 1} — genel attribute yazma."""
+    try:
+        data = await request.json()
+        attr = int(data["attr"])
+        value = int(data["value"])
+    except (ValueError, TypeError, KeyError):
+        return web.json_response({"error": "attr ve value gerekli"}, status=400)
+    asyncio.create_task(_run_ble(write_attribute(attr, value),
+                                 f"attr {attr} = {value}"))
+    return web.json_response({"attr": attr, "value": value})
+
+
+def _decode_telemetry(res):
+    """Ham okuma sonucunu HA'nın kullanacağı isimli alanlara çevir."""
+    out = {}
+
+    def first(attr):
+        r = res.get(attr)
+        return r["values"][0] if r and r.get("values") else None
+
+    fw = first(ATTR_FIRMWARE_VERSION)
+    if fw is not None:
+        out["firmware_version"] = fw
+    op = first(ATTR_OPERATION_STATE)
+    if op is not None:
+        out["operation_state"] = OPERATION_STATES.get(op, f"Unknown({op})")
+    err = first(ATTR_ERROR_STATE)
+    if err is not None:
+        out["error_state"] = ERROR_STATES.get(err, f"Unknown({err})")
+    puck = first(ATTR_PUCK_TEMPERATURE)
+    if puck is not None:
+        out["puck_temperature"] = puck
+    mod = first(ATTR_MINUTE_OF_DAY)
+    if mod is not None:
+        out["device_minute_of_day"] = mod
+        out["device_time"] = f"{mod // 60:02d}:{mod % 60:02d}"
+    clk = first(ATTR_IS_CLOCK_SET)
+    if clk is not None:
+        out["clock_set"] = bool(clk)
+    acc = first(ATTR_ACCLIMATION_ENABLED)
+    if acc is not None:
+        out["acclimation_enabled"] = bool(acc)
+    lun = first(ATTR_LUNAR_ENABLED)
+    if lun is not None:
+        out["lunar_enabled"] = bool(lun)
+    pv = res.get(ATTR_PHYSICAL_VALUES)
+    if pv and pv.get("values"):
+        for idx, val in enumerate(pv["values"]):
+            name = PHYSICAL_VALUE_NAMES.get(idx)
+            if name:
+                out[name] = val
+    return out
+
+
+async def refresh_telemetry():
+    global _telemetry, _telemetry_at
+    specs = [(ATTR_FIRMWARE_VERSION, 0, 1), (ATTR_OPERATION_STATE, 0, 1),
+             (ATTR_ERROR_STATE, 0, 1), (ATTR_PUCK_TEMPERATURE, 0, 1),
+             (ATTR_MINUTE_OF_DAY, 0, 1), (ATTR_IS_CLOCK_SET, 0, 1),
+             (ATTR_ACCLIMATION_ENABLED, 0, 1), (ATTR_LUNAR_ENABLED, 0, 1),
+             (ATTR_PHYSICAL_VALUES, 0, 17)]
+    print(f"\n{'='*50}\nTELEMETRİ OKUNUYOR\n{'='*50}")
+    res = await read_attributes(specs)
+    _telemetry = _decode_telemetry(res)
+    _telemetry_at = datetime.now().isoformat(timespec="seconds")
+    print(f"  telemetri: {_telemetry}")
+
+
+async def handle_telemetry(request):
+    """GET /telemetry — önbellek; ?refresh=1 ile cihazdan tazele."""
+    if request.query.get("refresh") == "1":
+        await _run_ble(refresh_telemetry(), "telemetry")
+    return web.json_response({"telemetry": _telemetry, "at": _telemetry_at})
+
+
+async def telemetry_loop():
+    """Arka planda seyrek telemetri yenileme."""
+    await asyncio.sleep(60)
+    while True:
+        try:
+            await _run_ble(refresh_telemetry(), "telemetry")
+        except Exception as e:
+            print(f"telemetri hatası: {e}")
+        await asyncio.sleep(TELEMETRY_INTERVAL)
+
+
 async def main():
     if len(sys.argv) > 1:
         cmd = sys.argv[1].lower()
@@ -508,11 +765,16 @@ async def main():
         app.router.add_get("/intensity/{value}", handle_intensity)
         app.router.add_get("/dump", handle_dump)
         app.router.add_post("/reset", handle_reset)
+        app.router.add_get("/read", handle_read)
+        app.router.add_post("/scene", handle_scene)
+        app.router.add_post("/attr", handle_attr_write)
+        app.router.add_get("/telemetry", handle_telemetry)
         print("XR15 server başlıyor: http://0.0.0.0:8765")
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", 8765)
         await site.start()
+        asyncio.create_task(telemetry_loop())
         await asyncio.Event().wait()
 
 if __name__ == "__main__":

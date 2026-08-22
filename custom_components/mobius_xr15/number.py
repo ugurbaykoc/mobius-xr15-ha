@@ -8,7 +8,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo, format_mac
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CHANNEL_NAMES, COLOR_CHANNELS, DEFAULT_CHANNEL_VALUES, DOMAIN, MAX_INTENSITY
+from .const import (
+    CHANNEL_NAMES,
+    COLOR_CHANNELS,
+    DEFAULT_CHANNEL_VALUES,
+    DOMAIN,
+    MAX_INTENSITY,
+    WEATHER_CHANNELS,
+)
 
 
 async def async_setup_entry(
@@ -16,7 +23,12 @@ async def async_setup_entry(
 ) -> None:
     """Set up one number entity per color channel."""
     mac = entry.data[CONF_MAC]
-    entities = [MobiusXR15ChannelNumber(mac, channel) for channel in COLOR_CHANNELS]
+    # Weather probabilities ride in the same schedule slots as the colour
+    # channels, so they are the same kind of entity - just not an LED.
+    entities = [
+        MobiusXR15ChannelNumber(mac, channel)
+        for channel in COLOR_CHANNELS + WEATHER_CHANNELS
+    ]
     async_add_entities(entities)
     hass.data[DOMAIN][entry.entry_id]["channel_numbers"] = entities
 

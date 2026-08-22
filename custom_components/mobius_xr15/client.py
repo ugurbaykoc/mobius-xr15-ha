@@ -79,3 +79,11 @@ class MobiusXR15Client:
     async def async_reset_bluetooth(self) -> None:
         """Clear a stuck BLE connection and power-cycle the adapter."""
         await self._request("POST", "/reset")
+
+    async def async_scene(self, scene: str) -> None:
+        """Trigger an instant scene (feed mode, thunderstorm, ...)."""
+        await self._request("POST", "/scene", json={"scene": scene})
+
+    async def async_write_attribute(self, attr: int, value: int) -> None:
+        """Write any C2 attribute; the bridge sizes the payload itself."""
+        await self._request("POST", "/attr", json={"attr": attr, "value": value})

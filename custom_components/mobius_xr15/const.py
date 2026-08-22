@@ -21,17 +21,41 @@ CHANNEL_NAMES: dict[int, str] = {
     19: "Green",
     20: "Red",
     32: "Moonlight Blue",
+    31: "Moonlight White",
     22: "Warm White",
     16: "Cool White",
     # Channel 1 is the schedule's own master dimmer: if it is 0, the light
     # outputs nothing regardless of the color channels. Named to avoid
     # colliding with the light entity's brightness in the UI.
     1: "Master Dimmer",
+    # Not LEDs at all: per-slot weather probabilities (M$VisualID 100/101)
+    # that the firmware animates by itself.
+    100: "Storm Probability",
+    101: "Cloud Probability",
 }
 
-# Channels exposed as user-editable color sliders (the 3 unidentified
-# protocol channels are left at 0 by the bridge and not exposed).
-COLOR_CHANNELS: tuple[int, ...] = (21, 23, 18, 17, 19, 20, 32, 22, 16, 1)
+# LED channels plus the master dimmer, exposed as sliders. Channel 31
+# (MoonlightWhite) is written too - a unit without it simply ignores the
+# value, and attribute 901 (SupportedColorChannels) can confirm.
+COLOR_CHANNELS: tuple[int, ...] = (21, 23, 18, 17, 19, 20, 32, 31, 22, 16, 1)
+
+# Not LEDs: per-slot weather probabilities the firmware acts on itself
+# (M$VisualID 100/101). Same 0-1000 scale, written into every slot.
+WEATHER_CHANNELS: tuple[int, ...] = (100, 101)
+
+# M$SceneID - instant effects, no schedule write needed.
+SCENES: tuple[tuple[str, str, str], ...] = (
+    ("feed", "Feed Mode", "mdi:fish"),
+    ("thunderstorm", "Thunderstorm", "mdi:weather-lightning"),
+    ("cloud_cover", "Cloud Cover", "mdi:weather-cloudy"),
+    ("all_off", "All Off", "mdi:lightbulb-off"),
+    ("all_on", "All On", "mdi:lightbulb-on"),
+    ("all_50", "All 50%", "mdi:lightbulb-on-50"),
+)
+
+# Attributes exposed as switches (bridge reads their size before writing).
+ATTR_ACCLIMATION_ENABLED = 902
+ATTR_LUNAR_ENABLED = 907
 
 # Default per-channel values, taken from the original schedule's noon peak.
 DEFAULT_CHANNEL_VALUES: dict[int, int] = {
@@ -42,9 +66,12 @@ DEFAULT_CHANNEL_VALUES: dict[int, int] = {
     19: 300,  # Green
     20: 150,  # Red
     32: 0,  # Moonlight Blue
+    31: 0,  # Moonlight White
     22: 300,  # Warm White
     16: 300,  # Cool White
-    1: 1000,  # Brightness
+    1: 1000,  # Master Dimmer
+    100: 0,  # Storm Probability
+    101: 0,  # Cloud Probability
 }
 
 # Approximate display color per channel, for a colored slider bar.
@@ -56,7 +83,10 @@ CHANNEL_COLORS: dict[int, str] = {
     19: "#22c55e",  # Green
     20: "#ef4444",  # Red
     32: "#312e81",  # Moonlight Blue - deep indigo
+    31: "#c7d2fe",  # Moonlight White - pale indigo
     22: "#fbbf24",  # Warm White - amber
     16: "#bae6fd",  # Cool White - pale cyan
-    1: "#f8fafc",  # Brightness - near white
+    1: "#f8fafc",  # Master Dimmer - near white
+    100: "#64748b",  # Storm Probability - slate
+    101: "#94a3b8",  # Cloud Probability - light slate
 }

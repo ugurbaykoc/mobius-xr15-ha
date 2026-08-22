@@ -195,6 +195,20 @@ Hard-won lessons, in the order they will bite you:
 6. **The bridge logs everything** — `journalctl -u xr15 -f` shows each connect attempt, packet write, and error in real time (the systemd unit runs Python unbuffered specifically so this works). `curl .../status` gives the last job's verdict, and the same thing appears in HA as the **Bridge Status** sensor.
 7. **Read the device's actual state** when in doubt: `curl "http://127.0.0.1:8765/dump?attr=511&variant=3"` returns the light's stored intensity as a raw C2 response frame (attr 500 = schedule, 510 = playback). If your value reads back, the write path works and the problem is elsewhere.
 
+#### What the protocol dump unlocked (v2.2.0)
+
+With the attribute and enum tables from [PROTOCOL.md](PROTOCOL.md), the integration now uses parts of the firmware it previously could not see:
+
+- **Scenes** — `Feed Mode`, `Thunderstorm`, `Cloud Cover`, `All Off`, `All On`, `All 50%` as buttons. Each is a single small write to attribute 401 rather than a 25-slot schedule, so it lands in about a second and barely touches the BLE link. The firmware animates thunderstorm and cloud cover itself.
+- **Weather in the schedule** — channels 100/101 turn out not to be LEDs but per-slot **Storm Probability** and **Cloud Probability**. They are now sliders alongside the colours and are written into every schedule point.
+- **Telemetry sensors** — LED puck temperature, driver and internal temperature, fan speed, operation state (`Schedule`/`Scene`/`LiveDemo`), error state (real fault codes like `LEDClusterOverTemp`), device clock and firmware version. The bridge reads these on a slow background loop (15 min) and caches them, so Home Assistant polls cost no BLE traffic.
+- **Firmware features as switches** — `Acclimation` (gradual intensity ramp for new corals, attribute 902) and `Lunar Cycle` (attribute 907). State is read back from the device, not assumed.
+- **Channel 31** is `MoonlightWhite` and is now exposed too.
+
+New bridge endpoints backing these: `GET /read?attr=N`, `POST /scene`, `POST /attr`, `GET /telemetry`. Attribute writes read the value's size from the device first, so payloads are correctly sized without hardcoding each attribute's width.
+
+> The device clock sensor is worth a look after setup: the whole schedule runs off the light's own clock (attribute 203), so if it drifts, the ramp drifts with it.
+
 #### Optional: maintenance reminders
 
 `akvaryum_bakim_helpers.yaml` + `akvaryum_bakim_automations.yaml` add dashboard-driven maintenance tracking for three tasks (water change, filter cleaning, glass cleaning): a last-done date and an adjustable interval per task, a "days remaining" template sensor (negative = overdue), a one-tap "done today" script wired to dashboard cards that turn red when due, and a daily 10:00 persistent notification listing anything due. Paste the helpers into `configuration.yaml` (merging top-level sections with any you already have), append the automation to `automations.yaml`, and use the 🧽 BAKIM section in `dashboards/akvaryum.yaml` as the UI. Swap `persistent_notification.create` for `notify.mobile_app_*` to get reminders on your phone.
