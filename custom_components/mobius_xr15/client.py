@@ -51,6 +51,33 @@ class MobiusXR15Client:
         info = bluetooth.async_last_service_info(self._hass, self._address, connectable=True)
         return info.rssi if info is not None else None
 
+    @property
+    def signal_sources(self) -> dict[str, int]:
+        """RSSI per radio that can currently see the light.
+
+        Home Assistant connects through whichever connectable scanner
+        hears the light loudest, so a single number cannot tell you
+        whether the proxy is earning its keep. This can: if the proxy
+        reads no better than the host adapter, it is not where it needs
+        to be.
+        """
+        try:
+            devices = bluetooth.async_scanner_devices_by_address(
+                self._hass, self._address, connectable=True
+            )
+        except Exception as err:  # helper availability varies across HA versions
+            _LOGGER.debug("%s: scanner listing unavailable: %s", self._address, err)
+            return {}
+
+        sources: dict[str, int] = {}
+        for device in devices:
+            scanner = device.scanner
+            name = getattr(scanner, "name", None) or getattr(scanner, "source", None)
+            rssi = getattr(device.advertisement, "rssi", None)
+            if name is not None and rssi is not None:
+                sources[str(name)] = int(rssi)
+        return sources
+
     def _on_disconnected(self, _client: BleakClientWithServiceCache) -> None:
         _LOGGER.debug("%s: disconnected", self._address)
 

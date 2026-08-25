@@ -58,6 +58,19 @@ class MobiusXR15SignalSensor(SensorEntity):
     def native_value(self) -> int | None:
         return self._client.rssi
 
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Per-radio RSSI, so a mis-placed proxy is visible at a glance.
+
+        The state is the best of these; the attributes say which radio
+        produced it and what the others hear.
+        """
+        sources = self._client.signal_sources
+        if not sources:
+            return {}
+        best = max(sources, key=sources.get)
+        return {"best_source": best, "sources": sources}
+
 
 class MobiusXR15LastErrorSensor(SensorEntity):
     """Why the last command failed, or 'ok'.
