@@ -6,7 +6,72 @@ This project was built by **reverse-engineering the undocumented Mobius BLE prot
 
 ---
 
-## How it works
+## How it works (v3)
+
+```
+Home Assistant ──BLE──► ESPHome Bluetooth proxy ──BLE──► XR15w G5 Pro
+ (custom component,       ESP32 beside the tank        Mobius C2 protocol
+  no bridge, no HTTP)     esphome/akvaryum-ble-proxy.yaml
+```
+
+The custom component speaks the C2 protocol itself, through Home
+Assistant's own Bluetooth integration. That integration routes each
+connection over whichever radio hears the light best, so dropping an
+ESP32 beside the tank moves the link there without a line of code
+changing.
+
+That last part is the whole reason v3 exists. A tank is a large bag of
+water and 2.4 GHz is absorbed by water — the same physics a microwave
+oven runs on. Home Assistant's own adapter, a few metres away and
+behind the glass, heard this light at about **-95 dBm**, close enough to
+the noise floor that connections failed at random and each failure wore
+a different mask: `DeviceNotFound` when the advertisement was lost,
+`InProgress` when the connect stalled, a missing TX characteristic when
+GATT resolution was cut short. One cause, three symptoms, and a lot of
+time spent debugging software. The proxy beside the tank reads
+**-68 dBm** — roughly 500× the received power — and the symptoms went
+with it.
+
+The **Signal Strength** sensor breaks its reading down per radio in its
+attributes, which is how you tell a proxy that is doing its job from
+one sitting on the wrong desk.
+
+### Entities
+
+| Entity | What it does |
+|---|---|
+| `light.*` | on/off and brightness — on installs the colour recipe as a schedule |
+| `number.*` ×13 | one per channel (10 colours, master dimmer, storm and cloud probability) |
+| `button.*` Apply Schedule | push slider edits without an off/on cycle |
+| `button.*` scenes ×8 | Feed Mode, Thunderstorm, Cloud Cover, Color Cycle, All On/Off/50%, Clear Scene |
+| `switch.*` Acclimation, Lunar Phases | firmware features the light runs by itself |
+| `sensor.*` Operation State, Device Error, Device Clock | read back from the light every 15 minutes |
+| `sensor.*` Telemetry | attribute 101, raw — off by default (enabling it is what starts the poll) |
+| `sensor.*` Signal Strength, Last Error | our end of the radio link |
+
+**Device Clock** is worth knowing about: the schedule runs on the
+light's own clock, not Home Assistant's, and its `drift_minutes`
+attribute is the first thing to check when a schedule fires late or not
+at all.
+
+### Writing attributes: the rule
+
+Every attribute write reads the attribute back first and uses the
+element width the **light itself reports**. Nothing is assumed. This is
+not caution for its own sake: a two-byte write to a one-byte attribute
+is not a rejected command but a corrupted one, and guessing it once put
+this light off the air until it was power-cycled. If the light will not
+say how wide a value is, the integration writes nothing and says so.
+
+Scaling is treated the same way. The Telemetry sensor reports raw
+numbers with no units, because the firmware's scale for each index is
+not documented anywhere that can be verified — a temperature might be
+degrees or tenths of a degree, and a plausible wrong reading is worse
+than an honest raw one.
+
+---
+
+## The older bridge architecture (v2)
 
 ```
 Home Assistant ──HTTP──► BLE Bridge (xr15_server.py) ──BLE──► XR15w G5 Pro

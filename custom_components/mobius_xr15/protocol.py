@@ -90,15 +90,72 @@ def build_schedule_packet(sub: int, slots: list[bytes], msg_id: int) -> bytes:
     return _frame(0x18, msg_id, payload)
 
 
+def build_set_packet(
+    attr_id: int, value: bytes, msg_id: int, sub: int = 0, count: int = 1
+) -> bytes:
+    """SET one attribute. `value` carries its own length - never guessed."""
+    payload = struct.pack("<H", attr_id) + bytes([sub, count, len(value)]) + value
+    return _frame(0x18, msg_id, payload)
+
+
+def build_get_packet(attr_id: int, msg_id: int, sub: int = 0, count: int = 1) -> bytes:
+    """GET an attribute.
+
+    The sub/count bytes are not optional: a bare attribute id comes back
+    as a status byte instead of a value, which is how this looked like a
+    device that would not answer.
+    """
+    payload = struct.pack("<H", attr_id) + bytes([sub, count])
+    return _frame(0x17, msg_id, payload)
+
+
 def build_intensity_packet(intensity: int, msg_id: int) -> bytes:
     value = struct.pack("<H", max(0, min(1000, int(intensity))))
-    payload = struct.pack("<H", ATTR_SCHEDULE1_INTENSITY) + bytes([0, 1, len(value)]) + value
-    return _frame(0x18, msg_id, payload)
+    return build_set_packet(ATTR_SCHEDULE1_INTENSITY, value, msg_id)
 
 
 def build_playback_packet(action: bytes, msg_id: int) -> bytes:
-    payload = struct.pack("<H", ATTR_SCHEDULE_PLAYBACK) + bytes([0, 1, len(action)]) + action
-    return _frame(0x18, msg_id, payload)
+    return build_set_packet(ATTR_SCHEDULE_PLAYBACK, action, msg_id)
+
+
+def parse_response(packets: list[bytes]) -> dict | None:
+    """Decode a 0xDF reply.
+
+    Frame: `02 DF op msgid(2) 00 00 len(2) | status(1) attr(2) sub(1)
+    count(1) elem_len(1) data | crc(2)`. Verified against a real device
+    (attribute 511 -> 777).
+
+    Packets are joined before parsing: a long reply - the PhysicalValues
+    array, say - arrives split across several notifications, and reading
+    only the first one cuts the body in half.
+    """
+    buf = b"".join(packets)
+    start = buf.find(b"\x02\xdf")
+    if start < 0 or len(buf) - start < 15:
+        return None
+    frame = buf[start:]
+    body = frame[9 : 9 + int.from_bytes(frame[7:9], "little")]
+    if len(body) < 6:
+        return None
+    status, sub, count, elem = body[0], body[3], body[4], body[5]
+    attr = int.from_bytes(body[1:3], "little")
+    data = body[6 : 6 + count * elem]
+    values: list[int] = []
+    if elem:
+        for i in range(count):
+            chunk = data[i * elem : (i + 1) * elem]
+            if len(chunk) == elem:
+                values.append(int.from_bytes(chunk, "little"))
+    return {
+        "status": status,
+        "attr": attr,
+        "sub": sub,
+        "count": count,
+        "elem_len": elem,
+        "values": values,
+        "raw": data.hex(),
+        "truncated": len(body) < 6 + count * elem,
+    }
 
 
 def build_write_sequence(slots: list[bytes], intensity: int) -> list[bytes]:
