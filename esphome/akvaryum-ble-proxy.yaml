@@ -1,0 +1,77 @@
+# Bluetooth proxy for the Radion XR15w G5 Pro.
+#
+# The light sits behind a tank of water and 2.4 GHz is absorbed by
+# water, so Home Assistant's own adapter only ever heard it at around
+# -95 dBm - close enough to the receiver's noise floor that connections
+# failed at random, each time with a different-looking error. This board
+# sits next to the tank and hears it at about -68 dBm, and Home
+# Assistant routes every BLE connection through it automatically.
+#
+# Board: plain ESP32 (rev3.1, 2 cores) - confirmed from its own boot
+# log, not from the seller's listing, which said S3. An S3 build would
+# have needed USB recovery to undo.
+
+esphome:
+  name: esphome-web-0f9bbc
+  friendly_name: akvaryum-ble-proxy
+  min_version: 2026.4.0
+  name_add_mac_suffix: false
+
+esp32:
+  variant: esp32
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # Keep the radio awake: the default power saving buffers packets until
+  # the next beacon, which showed up as ping times wandering between 17
+  # and 76 ms.
+  power_save_mode: none
+  # Come back within seconds of a dropout instead of rescanning every
+  # channel - a dropout is what took the proxy off the air once already.
+  fast_connect: true
+  # A fixed address means the ESPHome integration never loses the board
+  # to a DHCP reshuffle.
+  manual_ip:
+    static_ip: 192.168.50.203
+    gateway: 192.168.50.1
+    subnet: 255.255.255.0
+    dns1: 192.168.50.1
+  # Recovery path if the static address is ever wrong for the network:
+  # without this the only way back in is a USB reflash.
+  ap:
+    ssid: "Akvaryum Proxy Fallback"
+    password: "akvaryum1234"
+
+captive_portal:
+
+esp32_ble_tracker:
+  # Continuous scanning, as ESPHome recommends for a proxy. WiFi and BLE
+  # share one radio, so this does cost latency - pings average around 90
+  # ms with spikes past 250 - but missing an advertisement costs more.
+  scan_parameters:
+    interval: 1100ms
+    window: 1100ms
+    active: true
+
+bluetooth_proxy:
+  active: true
+
+sensor:
+  - platform: wifi_signal
+    name: "WiFi Sinyal"
+    update_interval: 60s
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP"
