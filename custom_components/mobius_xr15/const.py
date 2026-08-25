@@ -4,11 +4,34 @@ DOMAIN = "mobius_xr15"
 
 DEFAULT_NAME = "Radion XR15w G5 Pro"
 
-# The BLE bridge (xr15_server.py) running on the Docker host. All BLE
-# protocol work lives there - this integration only speaks HTTP to it.
-DEFAULT_URL = "http://127.0.0.1:8765"
-
 MAX_INTENSITY = 1000
+
+# GATT characteristics on the light.
+TX_FINAL_UUID = "01ff0104-ba5e-f4ee-5ca1-eb1e5e4b1ce0"
+RX_DATA_UUID = "01ff0101-ba5e-f4ee-5ca1-eb1e5e4b1ce0"
+RX_FINAL_UUID = "01ff0102-ba5e-f4ee-5ca1-eb1e5e4b1ce0"
+
+# C2 protocol attributes (M$C2Attribute - see PROTOCOL.md).
+ATTR_SCHEDULE1 = 500
+ATTR_SCHEDULE_PLAYBACK = 510
+ATTR_SCHEDULE1_INTENSITY = 511
+SCHED_RESUME = bytes([1, 0])  # StartResume, duration Undefined
+
+SLOT_COUNT = 25
+BATCH_SIZE = 8  # 8 x 42B slots = 352B, safely inside the 517B MTU
+
+# Channel ids in wire order for a 42-byte slot.
+CHANNELS_42: tuple[int, ...] = (21, 23, 18, 17, 19, 20, 31, 32, 22, 16, 1, 101, 100)
+
+# The eleven time points (minutes) the original schedule used, and the
+# brightness curve applied across them. The device interpolates linearly
+# between points, so these eleven produce a smooth day.
+SCHEDULE_TIMES: tuple[int, ...] = (0, 360, 480, 600, 720, 840, 960, 1080, 1200, 1320, 1410)
+DAY_CURVE: tuple[float, ...] = (0.2, 0.4, 0.6, 0.8, 1.0, 1.0, 0.8, 0.6, 0.4, 0.2, 0.1)
+
+# Channel 1 gates every other channel: at 0 the light stays dark no
+# matter what the colours say. The day curve scales this one alone.
+MASTER_CHANNEL = 1
 
 # Names confirmed against the Mobius app's own M$VisualID enum (v2.26) -
 # see PROTOCOL.md. Channel 31 is MoonlightWhite, and 100/101 are not LEDs

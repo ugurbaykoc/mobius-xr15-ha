@@ -13,7 +13,8 @@ from homeassistant.helpers.restore_state import RestoreEntity
 
 from .client import MobiusXR15Client
 from .const import DOMAIN
-from .schedule import brightness_to_intensity, intensity_to_brightness
+from .protocol import build_blank_schedule
+from .schedule import brightness_to_intensity, build_recipe_schedule, intensity_to_brightness
 
 DEFAULT_INTENSITY = 500
 
@@ -21,7 +22,7 @@ DEFAULT_INTENSITY = 500
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up the Mobius XR15 light from a config entry."""
+    """Set up the Mobius XR15 light."""
     store = hass.data[DOMAIN][entry.entry_id]
     light = MobiusXR15Light(store["client"], entry)
     store["light"] = light
@@ -29,11 +30,10 @@ async def async_setup_entry(
 
 
 class MobiusXR15Light(LightEntity, RestoreEntity):
-    """Controls schedule playback and overall intensity via the bridge.
+    """The light itself.
 
-    The device has no reliable state readback over this protocol, so state
-    is optimistic: it reflects the last command sent, restored across
-    Home Assistant restarts via RestoreEntity.
+    State is optimistic - the protocol offers no dependable readback of
+    what the light is currently showing - and is restored across restarts.
     """
 
     _attr_has_entity_name = True
@@ -64,20 +64,12 @@ class MobiusXR15Light(LightEntity, RestoreEntity):
             self._attr_is_on = last_state.state == "on"
             if (brightness := last_state.attributes.get(ATTR_BRIGHTNESS)) is not None:
                 self._attr_brightness = brightness
-        # Re-render (and update availability) whenever the bridge poll runs.
-        coordinator = self.hass.data[DOMAIN][self._entry_id]["coordinator"]
-        self.async_on_remove(coordinator.async_add_listener(self.async_write_ha_state))
-
-    @property
-    def available(self) -> bool:
-        """Unavailable when the bridge itself is unreachable."""
-        return self.hass.data[DOMAIN][self._entry_id]["coordinator"].last_update_success
 
     def _recipe(self) -> dict[int, int]:
         store = self.hass.data[DOMAIN][self._entry_id]
         return {
             entity.channel: int(entity.native_value or 0)
-            for entity in store["channel_numbers"]
+            for entity in store.get("channel_numbers", [])
         }
 
     async def async_turn_on(self, **kwargs: Any) -> None:
@@ -90,16 +82,17 @@ class MobiusXR15Light(LightEntity, RestoreEntity):
             self._attr_brightness = intensity_to_brightness(intensity)
 
         if self._attr_is_on:
-            # Schedule already playing - just retarget intensity.
+            # Already playing: retarget intensity, 2 packets instead of ~8.
             await self._client.async_set_intensity(intensity)
         else:
-            # Install the current color recipe and start playback.
-            await self._client.async_apply(self._recipe(), intensity)
+            await self._client.async_write_schedule(
+                build_recipe_schedule(self._recipe()), intensity
+            )
 
         self._attr_is_on = True
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self._client.async_turn_off()
+        await self._client.async_write_schedule(build_blank_schedule(), DEFAULT_INTENSITY)
         self._attr_is_on = False
         self.async_write_ha_state()
