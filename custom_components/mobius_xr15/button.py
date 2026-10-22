@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo, format_mac
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import ATTR_CURRENT_SCENE, DOMAIN, SCENES
+from .const import ATTR_CURRENT_SCENE, DOMAIN, MASTER_CHANNEL, SCENES
 from .coordinator import MobiusXR15Coordinator
 from .schedule import brightness_to_intensity, build_recipe_schedule
 
@@ -22,6 +22,7 @@ async def async_setup_entry(
     entities: list[ButtonEntity] = [
         MobiusXR15ApplyScheduleButton(hass, entry.entry_id, mac),
         MobiusXR15RefreshButton(store["coordinator"], mac),
+        MobiusXR15ImportScheduleButton(hass, entry.entry_id, mac),
     ]
     entities.extend(
         MobiusXR15SceneButton(store["client"], mac, key, label, icon, scene_id)
@@ -108,3 +109,45 @@ class MobiusXR15RefreshButton(ButtonEntity):
 
     async def async_press(self) -> None:
         await self._coordinator.async_request_refresh()
+
+
+class MobiusXR15ImportScheduleButton(ButtonEntity):
+    """Read the schedule the light is playing and adopt it here.
+
+    The Mobius app's coral templates - LPS, SPS and the rest - are not
+    in the app's own package; it downloads them. So rather than guess at
+    their curves, this reads back whatever the light is actually
+    playing. Apply a template in the app, press this, and the sliders
+    hold that template's colours, with the whole curve recorded on the
+    Schedule sensor.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Import Schedule"
+    _attr_icon = "mdi:download-circle-outline"
+
+    def __init__(self, hass: HomeAssistant, entry_id: str, mac: str) -> None:
+        self._hass = hass
+        self._entry_id = entry_id
+        device_id = format_mac(mac)
+        self._attr_unique_id = f"{device_id}_import_schedule"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device_id)})
+
+    async def async_press(self) -> None:
+        store = self._hass.data[DOMAIN][self._entry_id]
+        slots = await store["client"].async_read_schedule()
+        store["schedule"] = slots
+
+        # Take the colours from the brightest point of the day: that is
+        # the template's recipe, with the rest of the curve being the
+        # same mix scaled down.
+        lit = [slot for slot in slots if slot["channels"].get(MASTER_CHANNEL)]
+        if lit:
+            peak = max(lit, key=lambda slot: slot["channels"][MASTER_CHANNEL])
+            for entity in store.get("channel_numbers", []):
+                value = peak["channels"].get(entity.channel)
+                if value is not None:
+                    await entity.async_set_native_value(value)
+
+        if (sensor := store.get("schedule_sensor")) is not None:
+            sensor.async_write_ha_state()

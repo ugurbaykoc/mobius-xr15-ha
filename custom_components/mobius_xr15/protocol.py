@@ -85,6 +85,25 @@ def make_slot(time_min: int, flags: int, channel_values: dict[int, int] | None =
     return struct.pack("<H", time_min) + bytes([flags]) + channels
 
 
+def parse_slot(slot: bytes) -> dict:
+    """Decode a 42-byte schedule slot read back from the light.
+
+    The channel ids are taken from the slot itself rather than from
+    CHANNELS_42: a schedule written by the Mobius app - one of its coral
+    templates, say - is free to order them differently or to use a
+    channel this project never writes.
+    """
+    channels = {
+        slot[offset]: int.from_bytes(slot[offset + 1 : offset + 3], "little")
+        for offset in range(3, 3 + 13 * 3, 3)
+    }
+    return {
+        "time": int.from_bytes(slot[0:2], "little"),
+        "flags": slot[2],
+        "channels": channels,
+    }
+
+
 def build_schedule_packet(sub: int, slots: list[bytes], msg_id: int) -> bytes:
     payload = struct.pack("<H", ATTR_SCHEDULE1) + bytes([sub, len(slots), 42]) + b"".join(slots)
     return _frame(0x18, msg_id, payload)

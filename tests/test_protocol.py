@@ -101,6 +101,32 @@ def test_slot_layout() -> None:
     assert len(const.CHANNELS_42) == 13
 
 
+def test_slot_round_trip() -> None:
+    original = {1: 1000, 18: 900, 17: 650, 21: 400}
+    decoded = protocol.parse_slot(protocol.make_slot(720, 1, original))
+    assert decoded["time"] == 720
+    assert decoded["flags"] == 1
+    assert len(decoded["channels"]) == 13
+    for channel, value in original.items():
+        assert decoded["channels"][channel] == value
+    assert not any(
+        value for channel, value in decoded["channels"].items() if channel not in original
+    )
+
+
+def test_decodes_channels_this_project_never_writes() -> None:
+    # A schedule written by the Mobius app may use any of the VisualID
+    # channels, in any order - the decoder reads the ids out of the slot
+    # rather than assuming CHANNELS_42.
+    pairs = [(24, 500), (25, 250), (26, 100), (27, 50), (28, 25), (29, 10),
+             (30, 5), (33, 1), (34, 2), (35, 3), (36, 4), (37, 5), (1, 800)]
+    slot = bytes([0xD0, 0x02, 1]) + b"".join(
+        bytes([channel]) + value.to_bytes(2, "little") for channel, value in pairs
+    )
+    assert len(slot) == const.SLOT_SIZE
+    assert protocol.parse_slot(slot)["channels"] == dict(pairs)
+
+
 if __name__ == "__main__":
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
     for test in tests:

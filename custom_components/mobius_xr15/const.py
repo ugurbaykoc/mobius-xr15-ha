@@ -24,6 +24,7 @@ ATTR_MINUTE_OF_DAY = 203
 ATTR_CURRENT_SCENE = 401
 
 SLOT_COUNT = 25
+SLOT_SIZE = 42  # time(2) + flags(1) + 13 x (channel id(1) + value(2))
 BATCH_SIZE = 8  # 8 x 42B slots = 352B, safely inside the 517B MTU
 
 # Channel ids in wire order for a 42-byte slot.

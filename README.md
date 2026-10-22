@@ -44,6 +44,7 @@ one sitting on the wrong desk.
 | `number.*` ×13 | one per channel (10 colours, master dimmer, storm and cloud probability) |
 | `button.*` Apply Schedule | push slider edits without an off/on cycle |
 | `button.*` scenes ×8 | Feed Mode, Thunderstorm, Cloud Cover, Color Cycle, All On/Off/50%, Clear Scene |
+| `button.*` Import Schedule | read back the schedule the light is playing and adopt its colours |
 | `switch.*` Acclimation, Lunar Phases | firmware features the light runs by itself |
 | `sensor.*` Operation State, Device Error, Device Clock | read back from the light every 15 minutes |
 | `sensor.*` Telemetry | attribute 101, raw — off by default (enabling it is what starts the poll) |
@@ -53,6 +54,23 @@ one sitting on the wrong desk.
 light's own clock, not Home Assistant's, and its `drift_minutes`
 attribute is the first thing to check when a schedule fires late or not
 at all.
+
+### The app's coral templates (LPS, SPS, …)
+
+They are not in the Mobius APK. Searching the package turns up the
+Templates UI and its descriptions — "Simulates a low-energy reef
+environment", "Promotes health, coral growth, and nutrient export" —
+but no channel values anywhere, in the dex or in the resources. The app
+downloads them (`Sync User Templates`, `hasDownloadedTemplates`), so
+there is nothing to extract.
+
+The way in is the light itself. Apply the template in the Mobius app,
+then press **Import Schedule**: the integration reads attribute 500
+back in four batches, decodes all 25 slots, sets the sliders to the
+colours at the brightest point of the day, and records the whole curve
+on the Schedule sensor. The curve is the device's, not a guess at what
+the template might contain — and it works for every template, not just
+the one someone thought to hard-code.
 
 ### Writing attributes: the rule
 

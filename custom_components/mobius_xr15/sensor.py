@@ -22,6 +22,7 @@ from .const import (
     ATTR_MINUTE_OF_DAY,
     ATTR_OPERATION_STATE,
     ATTR_PHYSICAL_VALUES,
+    CHANNEL_NAMES,
     DOMAIN,
     ERROR_STATES,
     OPERATION_STATES,
@@ -39,6 +40,8 @@ async def async_setup_entry(
     store = hass.data[DOMAIN][entry.entry_id]
     mac = entry.data[CONF_MAC]
     coordinator: MobiusXR15Coordinator = store["coordinator"]
+    schedule_sensor = MobiusXR15ScheduleSensor(store, mac)
+    store["schedule_sensor"] = schedule_sensor
     async_add_entities(
         [
             MobiusXR15SignalSensor(store["client"], mac),
@@ -47,6 +50,7 @@ async def async_setup_entry(
             MobiusXR15ErrorStateSensor(coordinator, mac),
             MobiusXR15ClockSensor(coordinator, mac),
             MobiusXR15TelemetrySensor(coordinator, mac),
+            schedule_sensor,
         ]
     )
 
@@ -232,3 +236,53 @@ class MobiusXR15TelemetrySensor(MobiusXR15ReadSensor):
             if index
         }
         return {**values, "raw": reply["raw"], "element_bytes": reply["elem_len"]}
+
+
+class MobiusXR15ScheduleSensor(SensorEntity):
+    """The schedule last read off the light, point by point.
+
+    Only updated when Import Schedule is pressed - a 25-slot read is far
+    too much traffic to repeat on a timer. The state is how many points
+    actually light up; the attributes spell each one out, which is what
+    makes a template applied in the Mobius app readable here.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Schedule"
+    _attr_icon = "mdi:chart-bell-curve-cumulative"
+    _attr_should_poll = False
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, store: dict, mac: str) -> None:
+        self._store = store
+        device_id = format_mac(mac)
+        self._attr_unique_id = f"{device_id}_schedule"
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device_id)})
+
+    def _lit_slots(self) -> list[dict]:
+        return [
+            slot
+            for slot in self._store.get("schedule") or []
+            if any(slot["channels"].values())
+        ]
+
+    @property
+    def native_value(self) -> int | None:
+        if self._store.get("schedule") is None:
+            return None
+        return len(self._lit_slots())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        points = {}
+        for slot in self._lit_slots():
+            label = f"{slot['time'] // 60 % 24:02d}:{slot['time'] % 60:02d}"
+            # Zeros are the overwhelming majority of a slot and say
+            # nothing; keeping them would push the attribute past what
+            # is readable in the UI.
+            points[label] = {
+                CHANNEL_NAMES.get(channel, f"Channel {channel}"): value
+                for channel, value in slot["channels"].items()
+                if value
+            }
+        return {"points": points}

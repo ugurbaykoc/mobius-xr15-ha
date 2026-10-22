@@ -23,13 +23,14 @@ from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import RX_DATA_UUID, RX_FINAL_UUID, TX_FINAL_UUID
+from .const import ATTR_SCHEDULE1, RX_DATA_UUID, RX_FINAL_UUID, SLOT_SIZE, TX_FINAL_UUID
 from .protocol import (
     build_get_packet,
     build_intensity_sequence,
     build_set_packet,
     build_write_sequence,
     parse_response,
+    parse_slot,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -41,6 +42,9 @@ _LOGGER = logging.getLogger(__name__)
 WRITE_DELAY_ACK = 0.05
 WRITE_DELAY_UNACKED = 0.35
 READ_WAIT = 1.5
+# A batch of eight slots is ~350 bytes arriving as several notifications;
+# give it longer than a single-value read before deciding it failed.
+SCHEDULE_WAIT = 2.5
 SERVICE_RESOLUTION_TIMEOUT = 3.0
 ATTEMPTS = 4
 
@@ -97,6 +101,44 @@ class MobiusXR15Client:
             return results
 
         return await self._run(work, f"read {[spec[0] for spec in specs]}")
+
+    async def async_read_schedule(self) -> list[dict[str, Any]]:
+        """Read the 25-slot schedule the light is currently playing.
+
+        This is how a schedule written by the Mobius app - one of its
+        coral templates, for instance - gets into Home Assistant: apply
+        it there, read it back here. Nothing about the curve is guessed,
+        because the curve comes from the light.
+
+        Read in the same batches the write uses: a full 25-slot reply
+        would be over a kilobyte, and 8 slots is the largest chunk that
+        fits comfortably in one exchange.
+        """
+        batches = [(0, 8), (8, 8), (16, 8), (24, 1)]
+
+        async def work(client, tx) -> list[dict[str, Any]]:
+            slots: list[dict[str, Any]] = []
+            for msg_id, (sub, count) in enumerate(batches, 1):
+                reply = await self._query(
+                    client, tx, ATTR_SCHEDULE1, msg_id, sub, count, wait=SCHEDULE_WAIT
+                )
+                if reply is None:
+                    raise HomeAssistantError(
+                        f"no reply for schedule slots {sub}-{sub + count - 1}"
+                    )
+                if reply["elem_len"] != SLOT_SIZE:
+                    raise HomeAssistantError(
+                        f"the light reports {reply['elem_len']}-byte schedule slots, "
+                        f"not {SLOT_SIZE} - refusing to decode them"
+                    )
+                data = bytes.fromhex(reply["raw"])
+                for index in range(reply["count"]):
+                    chunk = data[index * SLOT_SIZE : (index + 1) * SLOT_SIZE]
+                    if len(chunk) == SLOT_SIZE:
+                        slots.append(parse_slot(chunk))
+            return slots
+
+        return await self._run(work, "read schedule")
 
     async def async_write_attribute(self, attr: int, value: int, sub: int = 0) -> int:
         """Write one attribute, using the length the device itself reports.
@@ -273,13 +315,14 @@ class MobiusXR15Client:
             await self._send_packet(client, tx, packet)
 
     async def _query(
-        self, client, tx, attr: int, msg_id: int, sub: int, count: int
+        self, client, tx, attr: int, msg_id: int, sub: int, count: int,
+        wait: float = READ_WAIT,
     ) -> dict[str, Any] | None:
         self._rx.clear()
         await client.write_gatt_char(
             tx, build_get_packet(attr, msg_id, sub, count), response="write" in tx.properties
         )
-        await asyncio.sleep(READ_WAIT)
+        await asyncio.sleep(wait)
         reply = parse_response(list(self._rx))
         if reply is not None and reply["attr"] != attr:
             # A late reply to the previous question in the batch.
