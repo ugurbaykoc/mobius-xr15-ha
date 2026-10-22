@@ -10,7 +10,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import ATTR_CURRENT_SCENE, DOMAIN, MASTER_CHANNEL, SCENES
 from .coordinator import MobiusXR15Coordinator
-from .schedule import brightness_to_intensity, build_recipe_schedule
+from .presets import PRESETS
+from .schedule import brightness_to_intensity, build_point_schedule, build_recipe_schedule
 
 
 async def async_setup_entry(
@@ -27,6 +28,10 @@ async def async_setup_entry(
     entities.extend(
         MobiusXR15SceneButton(store["client"], mac, key, label, icon, scene_id)
         for key, label, icon, scene_id in SCENES
+    )
+    entities.extend(
+        MobiusXR15PresetButton(hass, entry.entry_id, mac, key, label, icon, points)
+        for key, label, icon, points in PRESETS
     )
     async_add_entities(entities)
 
@@ -64,6 +69,9 @@ class MobiusXR15ApplyScheduleButton(ButtonEntity):
             intensity = brightness_to_intensity(light.brightness)
         else:
             intensity = 500
+        # Pushing the sliders means the sliders are what the user wants
+        # on the light now, not a template installed earlier.
+        store["preset_points"] = None
         await store["client"].async_write_schedule(build_recipe_schedule(channels), intensity)
 
 
@@ -151,3 +159,45 @@ class MobiusXR15ImportScheduleButton(ButtonEntity):
 
         if (sensor := store.get("schedule_sensor")) is not None:
             sensor.async_write_ha_state()
+
+
+class MobiusXR15PresetButton(ButtonEntity):
+    """Install a captured schedule exactly as it was read off the light.
+
+    This is not the slider recipe scaled across the day: it is the
+    template's own points, so the blue-only dawn and the moonlight
+    phase survive. The light remembers it, so turning off and on again
+    restores the template rather than the sliders.
+    """
+
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry_id: str,
+        mac: str,
+        key: str,
+        label: str,
+        icon: str,
+        points,
+    ) -> None:
+        self._hass = hass
+        self._entry_id = entry_id
+        self._points = points
+        device_id = format_mac(mac)
+        self._attr_unique_id = f"{device_id}_preset_{key}"
+        self._attr_name = label
+        self._attr_icon = icon
+        self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device_id)})
+
+    async def async_press(self) -> None:
+        store = self._hass.data[DOMAIN][self._entry_id]
+        await store["client"].async_write_points_at_current_intensity(
+            build_point_schedule(self._points)
+        )
+        # Remember it, so the light entity reinstalls this rather than
+        # the sliders on the next off -> on.
+        store["preset_points"] = self._points
+        if (light := store.get("light")) is not None:
+            light.set_on()

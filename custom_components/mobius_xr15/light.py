@@ -14,7 +14,12 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from .client import MobiusXR15Client
 from .const import DOMAIN
 from .protocol import build_blank_schedule
-from .schedule import brightness_to_intensity, build_recipe_schedule, intensity_to_brightness
+from .schedule import (
+    brightness_to_intensity,
+    build_point_schedule,
+    build_recipe_schedule,
+    intensity_to_brightness,
+)
 
 DEFAULT_INTENSITY = 500
 
@@ -72,6 +77,24 @@ class MobiusXR15Light(LightEntity, RestoreEntity):
             for entity in store.get("channel_numbers", [])
         }
 
+    def _schedule_slots(self) -> list[bytes]:
+        """What to install on the light when it comes on.
+
+        A captured template, if one has been applied: its shape - a
+        blue-only dawn, a moonlight phase - is the point of it, and
+        flattening it into the slider recipe would be throwing it away.
+        Otherwise the sliders, scaled across the day.
+        """
+        store = self.hass.data[DOMAIN][self._entry_id]
+        if (points := store.get("preset_points")) is not None:
+            return build_point_schedule(points)
+        return build_recipe_schedule(self._recipe())
+
+    def set_on(self) -> None:
+        """Mark the light on after something else installed a schedule."""
+        self._attr_is_on = True
+        self.async_write_ha_state()
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         if ATTR_BRIGHTNESS in kwargs:
             self._attr_brightness = kwargs[ATTR_BRIGHTNESS]
@@ -85,9 +108,7 @@ class MobiusXR15Light(LightEntity, RestoreEntity):
             # Already playing: retarget intensity, 2 packets instead of ~8.
             await self._client.async_set_intensity(intensity)
         else:
-            await self._client.async_write_schedule(
-                build_recipe_schedule(self._recipe()), intensity
-            )
+            await self._client.async_write_schedule(self._schedule_slots(), intensity)
 
         self._attr_is_on = True
         self.async_write_ha_state()

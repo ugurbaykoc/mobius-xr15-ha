@@ -31,3 +31,14 @@ def build_recipe_schedule(channel_values: dict[int, int], curve: bool = True) ->
             values[MASTER_CHANNEL] = max(0, min(MAX_INTENSITY, round(master * factor)))
         slots.append(make_slot(time_min, 0x01, values))
     return slots
+
+
+def build_point_schedule(points) -> list[bytes]:
+    """Write a captured schedule back exactly as it was read.
+
+    Nothing is scaled or re-timed. A template's shape lives in which
+    channels are lit at which minute - blue-only dawns, a moonlight
+    phase - and reshaping it into this project's single-recipe curve
+    would throw away the part worth having.
+    """
+    return [make_slot(time_min, 0x01, channels) for time_min, channels in points]

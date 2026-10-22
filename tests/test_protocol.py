@@ -30,6 +30,8 @@ def _load(name: str):
 
 const = _load("const")
 protocol = _load("protocol")
+schedule = _load("schedule")
+presets = _load("presets")
 
 # Captured from the light itself: a GET of attribute 511 answering 777.
 REAL_REPLY = bytes.fromhex("02df17010000000800" "00ff01000102" "0903" "8ac1")
@@ -125,6 +127,40 @@ def test_decodes_channels_this_project_never_writes() -> None:
     )
     assert len(slot) == const.SLOT_SIZE
     assert protocol.parse_slot(slot)["channels"] == dict(pairs)
+
+
+def test_lps_preset_matches_what_the_light_reported() -> None:
+    # Captured with Import Schedule after applying LPS in the Mobius
+    # app. If the preset ever stops reproducing this exactly, it is no
+    # longer the template - it is something we made up.
+    expected = {
+        "03:00": {"Master Dimmer": 1000},
+        "04:09": {"UV": 1000, "Violet": 1000, "Royal Blue": 1000, "Blue": 1000,
+                  "Master Dimmer": 500},
+        "05:19": {"UV": 1000, "Violet": 1000, "Royal Blue": 1000, "Blue": 1000,
+                  "Green": 200, "Red": 250, "Warm White": 150, "Cool White": 150,
+                  "Master Dimmer": 1000},
+        "19:23": {"UV": 1000, "Violet": 1000, "Royal Blue": 1000, "Blue": 1000,
+                  "Green": 200, "Red": 250, "Warm White": 150, "Cool White": 150,
+                  "Master Dimmer": 1000},
+        "20:33": {"UV": 1000, "Violet": 1000, "Royal Blue": 1000, "Blue": 1000,
+                  "Master Dimmer": 500},
+        "21:45": {"Moonlight White": 250, "Moonlight Blue": 250},
+        "21:54": {"Moonlight White": 1000, "Moonlight Blue": 1000, "Master Dimmer": 1000},
+        "22:33": {"Moonlight White": 1000, "Moonlight Blue": 1000, "Master Dimmer": 1000},
+        "22:44": {"Master Dimmer": 1000},
+    }
+    got = {}
+    for raw in schedule.build_point_schedule(presets.LPS):
+        assert len(raw) == const.SLOT_SIZE
+        decoded = protocol.parse_slot(raw)
+        label = f"{decoded['time'] // 60 % 24:02d}:{decoded['time'] % 60:02d}"
+        got[label] = {
+            const.CHANNEL_NAMES[channel]: value
+            for channel, value in decoded["channels"].items()
+            if value
+        }
+    assert got == expected
 
 
 if __name__ == "__main__":

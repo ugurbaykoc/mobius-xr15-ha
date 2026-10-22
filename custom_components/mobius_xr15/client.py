@@ -23,7 +23,15 @@ from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import ATTR_SCHEDULE1, RX_DATA_UUID, RX_FINAL_UUID, SLOT_SIZE, TX_FINAL_UUID
+from .const import (
+    ATTR_SCHEDULE1,
+    ATTR_SCHEDULE1_INTENSITY,
+    MAX_INTENSITY,
+    RX_DATA_UUID,
+    RX_FINAL_UUID,
+    SLOT_SIZE,
+    TX_FINAL_UUID,
+)
 from .protocol import (
     build_get_packet,
     build_intensity_sequence,
@@ -82,6 +90,26 @@ class MobiusXR15Client:
         await self._run(
             lambda c, tx: self._send_all(c, tx, packets), f"intensity {intensity}"
         )
+
+    async def async_write_points_at_current_intensity(self, slots: list[bytes]) -> int:
+        """Install a captured schedule without touching the intensity.
+
+        A template carries its own brightness in the light's global
+        intensity attribute, and overwriting that with Home Assistant's
+        idea of brightness would change the template while claiming to
+        restore it. So the current value is read back and written
+        unchanged alongside the slots.
+        """
+
+        async def work(client, tx) -> int:
+            reply = await self._query(client, tx, ATTR_SCHEDULE1_INTENSITY, 1, 0, 1)
+            intensity = (
+                reply["values"][0] if reply and reply["values"] else MAX_INTENSITY
+            )
+            await self._send_all(client, tx, build_write_sequence(slots, intensity))
+            return intensity
+
+        return await self._run(work, "apply preset")
 
     async def async_read_attributes(
         self, specs: list[tuple[int, int, int]]
