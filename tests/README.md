@@ -1,8 +1,8 @@
-# XR15 Bridge API Tests
+# REST Assured + Cucumber Framework
 
-REST Assured + Cucumber (BDD) test automation suite for the `xr15_server.py` BLE HTTP
-bridge — covering the `/status`, `/on`, and `/off` endpoints used by the Home
-Assistant `rest_command` integration.
+An empty starter project for API test automation using REST Assured and
+Cucumber (BDD). It contains no test cases — add your own `.feature` files
+and step definitions as you need them.
 
 ## Stack
 
@@ -10,7 +10,6 @@ Assistant `rest_command` integration.
 - Maven
 - Cucumber 7 (JUnit 5 Platform Engine)
 - REST Assured
-- WireMock (embedded mock of the bridge, so the suite runs without real BLE hardware)
 
 ## Project layout
 
@@ -18,49 +17,68 @@ Assistant `rest_command` integration.
 tests/
 ├── pom.xml
 └── src/test/
-    ├── java/com/mobius/xr15/tests/
-    │   ├── runner/RunCucumberTest.java   # entry point Maven/Surefire runs
-    │   ├── config/TestConfig.java        # base URL + mock/real toggle
-    │   ├── hooks/Hooks.java              # starts/stops the mock server
-    │   ├── mock/MockXr15Server.java      # WireMock stand-in for xr15_server.py
-    │   └── steps/XR15Steps.java          # step definitions
-    └── resources/features/
-        ├── status.feature
-        ├── power_control.feature
-        └── error_handling.feature
+    ├── java/com/framework/
+    │   ├── runner/TestRunner.java     # entry point Maven/Surefire runs
+    │   ├── hooks/Hooks.java           # global setup (e.g. RestAssured.baseURI)
+    │   ├── utils/ConfigReader.java    # reads config.properties / -D overrides
+    │   └── stepdefinitions/           # put your step definition classes here
+    └── resources/
+        ├── config.properties          # base.uri and any other settings
+        └── features/                  # put your .feature files here
 ```
 
-## Running the tests
+## Adding a test
 
-### Against the embedded mock (default, no hardware needed)
+1. Drop a `.feature` file into `src/test/resources/features/`.
+2. Add a step definition class under `src/test/java/com/framework/stepdefinitions/`.
+3. Run `mvn test`.
+
+A minimal example to get started:
+
+```gherkin
+# src/test/resources/features/example.feature
+Feature: Example API check
+
+  Scenario: Get a resource
+    When I send a GET request to "/some/endpoint"
+    Then the response status code should be 200
+```
+
+```java
+// src/test/java/com/framework/stepdefinitions/ExampleSteps.java
+package com.framework.stepdefinitions;
+
+import io.cucumber.java.en.Then;
+import io.cucumber.java.en.When;
+import io.restassured.response.Response;
+
+import static io.restassured.RestAssured.given;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.is;
+
+public class ExampleSteps {
+
+    private Response response;
+
+    @When("I send a GET request to {string}")
+    public void i_send_a_get_request_to(String path) {
+        response = given().when().get(path);
+    }
+
+    @Then("the response status code should be {int}")
+    public void the_response_status_code_should_be(int expectedCode) {
+        assertThat(response.statusCode(), is(expectedCode));
+    }
+}
+```
+
+## Running
 
 ```bash
 cd tests
-mvn test
+mvn test                                        # uses base.uri from config.properties
+mvn test -Dbase.uri=https://api.example.com     # override the target API
 ```
-
-By default the suite starts an in-process WireMock server on port 8765 that mimics
-`xr15_server.py`'s behavior (stateful `/on` → `/off` → `/status` transitions), so
-it's safe to run in CI or on a laptop with no Raspberry Pi or BLE light attached.
-
-### Against a real bridge server
-
-Point the suite at an actual `xr15_server.py` instance (e.g. running on your
-Raspberry Pi) and disable the mock:
-
-```bash
-cd tests
-mvn test -Dxr15.baseUrl=http://192.168.50.182:8765 -Dxr15.useMock=false
-```
-
-Supplying `xr15.baseUrl` automatically disables the mock; `-Dxr15.useMock=false`
-is shown for clarity but is optional. The base URL can also be supplied via the
-`XR15_BASE_URL` environment variable.
-
-> Note: `/on` and `/off` on the real server kick off the BLE write asynchronously
-> and respond immediately, so these tests validate the HTTP contract (status
-> codes, JSON shape, state bookkeeping) rather than confirming the physical
-> light actually changed — verify that visually or via `xr15_server.py status`.
 
 ## Reports
 

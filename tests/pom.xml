@@ -4,13 +4,13 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.mobius.xr15</groupId>
-    <artifactId>xr15-api-tests</artifactId>
+    <groupId>com.framework</groupId>
+    <artifactId>rest-assured-cucumber-framework</artifactId>
     <version>1.0.0</version>
     <packaging>jar</packaging>
 
-    <name>XR15 Bridge API Tests</name>
-    <description>REST Assured + Cucumber BDD test suite for the Mobius XR15 BLE HTTP bridge (xr15_server.py)</description>
+    <name>REST Assured + Cucumber Framework</name>
+    <description>Empty starter framework for API test automation with REST Assured and Cucumber (BDD)</description>
 
     <properties>
         <maven.compiler.release>17</maven.compiler.release>
@@ -21,14 +21,11 @@
         <junit-platform.version>1.10.2</junit-platform.version>
         <rest-assured.version>5.4.0</rest-assured.version>
         <hamcrest.version>2.2</hamcrest.version>
-        <wiremock.version>3.5.4</wiremock.version>
 
         <surefire.version>3.2.5</surefire.version>
 
-        <!-- Override on the command line, e.g.:
-             mvn test -Dxr15.baseUrl=http://192.168.50.182:8765 -Dxr15.useMock=false -->
-        <xr15.baseUrl></xr15.baseUrl>
-        <xr15.useMock></xr15.useMock>
+        <!-- Override per environment, e.g.: mvn test -Dbase.uri=https://staging.example.com -->
+        <base.uri></base.uri>
     </properties>
 
     <dependencyManagement>
@@ -89,14 +86,6 @@
             <version>${hamcrest.version}</version>
             <scope>test</scope>
         </dependency>
-
-        <!-- Embedded mock server: lets the suite run without real BLE hardware -->
-        <dependency>
-            <groupId>org.wiremock</groupId>
-            <artifactId>wiremock</artifactId>
-            <version>${wiremock.version}</version>
-            <scope>test</scope>
-        </dependency>
     </dependencies>
 
     <build>
@@ -107,11 +96,10 @@
                 <version>${surefire.version}</version>
                 <configuration>
                     <includes>
-                        <include>**/RunCucumberTest.java</include>
+                        <include>**/TestRunner.java</include>
                     </includes>
                     <systemPropertyVariables>
-                        <xr15.baseUrl>${xr15.baseUrl}</xr15.baseUrl>
-                        <xr15.useMock>${xr15.useMock}</xr15.useMock>
+                        <base.uri>${base.uri}</base.uri>
                     </systemPropertyVariables>
                 </configuration>
             </plugin>
